@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "priors": {
+      "type": "streamable-http",
+      "url": "https://priors-brain9.vercel.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${PRIORS_TOKEN_CODEX_V1}"
+      }
+    }
+  }
+}

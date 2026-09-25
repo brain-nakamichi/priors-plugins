@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "priors",
+  "version": "0.1.0",
+  "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
+  "author": {
+    "name": "Priors"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Priors",
+        "shortDescription": "Priorsの記憶をCodexで使う",
+        "longDescription": "Priorsの記憶を安全なMCP接続とスキルから利用します。",
+        "developerName": "Priors",
+        "category": "Productivity"
+      }
+    }
+  }
+}
