@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "priors": {
+      "type": "http",
+      "url": "https://priors-brain9.vercel.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${PRIORS_TOKEN_CODEX_V1}"
+      }
+    }
+  }
+}
