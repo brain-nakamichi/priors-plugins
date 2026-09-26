@@ -1,9 +1,21 @@
 ---
 name: priors
-description: Priors（AI長期記憶のMCPサーバー）に記憶を残す・思い出す・テーマを決める・作業を区切るときの手順と判断基準。発火条件 — 「Priors に残して」「Priors で思い出して」「テーマを決めて」「Priors に checkpoint」のように、Priors（または記憶のテーマ prefix）と同じ発話の中で「残す／記憶／思い出す／テーマ／checkpoint／guard」が共起したとき。「これ覚えておいて」のように保存先が曖昧なときも発火してよいが、書込先（Priors／プロジェクトのメモ／CLAUDE.md）を一度だけ利用者に確認する。checkpoint・guard・get・recall が単独で出る発話（学習の重み保存、regression-guard 等のエージェント名、一般語）では発火しない。
+description: Priors（AI長期記憶のMCPサーバー）を毎ターン使うか判断し、必要なときだけ安全に残す・思い出す・テーマを決める手順。毎回 use-read / write-candidate / skip のいずれかを選び、使わない場合もローカル監査ログへ記録する。
 ---
 
 # Priors｜記憶を残す・思い出す・テーマを決める
+
+## 0. 毎ターンの判定（省略しない）
+
+各ユーザー入力について、応答や作業に入る前に次のいずれかを選ぶ。
+
+- **use-read**: 既存の決定・経緯・制約が関係する。`context_open` → `recall` / `get` 等。
+- **write-candidate**: 利用者が記憶を求めた、または将来も再利用する確定事項がある。`context_open` → `recall` → `guard` → `remember` / `amend`。`guard` が clear でない限り書込まない。
+- **skip**: Priors の参照・書込が不要。推測で呼ばず、判断だけを監査ログへ残す。
+
+Claude の UserPromptSubmit フックはこの判定を毎回リマインドし、入力本文は保存せずハッシュ値と `pending` のみを保留記録する。明示的な結果は、プラグイン内の `hooks/record-decision.js --decision use-read|write-candidate|skip --client claude --phase turn-start|conversation-end --prompt-sha256 <hash>` でローカルの `~/.priors/decision-audit.jsonl` に追記する。ログは Priors 本文と別物で、トークン・本文・接続情報を含めない。Stop の呼出確認は本文を保存しない匿名カウンタへ記録する。
+
+会話を終了する前にも必ず同じ判定を行う。Claude の終了イベントが判定をリマインドし、Codex はこの節を毎ターンの完了条件として扱う。`use-read` / `write-candidate` / `skip` のいずれかを監査ログへ記録し、未判定のまま終了しない。終了イベントは書込を実行せず、`write-candidate` の次の応答でだけ通常の `context_open` → `recall` → `guard` → `remember` / `amend` 手順へ進む。
 
 Priors は MCP サーバーが正本。このスキルは**規約の置き場**であり、テーマ一覧（prefix の実例を含む）・enum の値の一覧・tool の引数一覧は書かない（版がずれるため）。値が要るときは次を見る。
 

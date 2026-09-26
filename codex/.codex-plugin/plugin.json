@@ -1,11 +1,12 @@
 {
   "name": "priors",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "description": "Priors plugin",
   "author": {
     "name": "Local developer"
   },
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Priors",
     "shortDescription": "Use Priors in Codex.",
@@ -13,7 +14,7 @@
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Help me use Priors."
+    "defaultPrompt": "At the start of every turn, run scripts/record-turn-start.js, decide use-read/write-candidate/skip, and record it with --phase turn-start. Before the final response, make and record a second decision with --phase conversation-end."
   },
   "mcpServers": "./.mcp.json"
 }

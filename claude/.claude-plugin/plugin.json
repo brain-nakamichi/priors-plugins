@@ -1,6 +1,6 @@
 {
   "name": "priors",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Priors の記憶をセッション開始時に下見として読み込む（書込はしない）",
   "author": {
     "name": "brain"

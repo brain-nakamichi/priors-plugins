@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "priors",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
   "author": {
     "name": "Priors"
@@ -13,8 +13,10 @@
         "shortDescription": "Priorsの記憶をCodexで使う",
         "longDescription": "Priorsの記憶を安全なMCP接続とスキルから利用します。",
         "developerName": "Priors",
-        "category": "Productivity"
-      }
+        "category": "Productivity",
+        "defaultPrompt": "Priors標準経路: 毎ターン開始時にturn-start判定を記録し、必要ならcontext_open→recall、書込み前はguard、回答終了前にconversation-end判定を記録する。"
+      },
+      "hooks": "./hooks/hooks.json"
     }
   }
 }

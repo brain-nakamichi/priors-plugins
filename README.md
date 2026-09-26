@@ -1,20 +1,35 @@
 # Priors plugins
 
-Priors の公式配布用プラグインです。Claude Code と Codex の配布物だけを含み、サーバー本体・データベース設定・資格情報は含みません。
+公開配布用の Priors プラグインです。Claude Code と Codex から Priors の MCP を利用できます。サーバー本体・データベース設定・資格情報は含みません。
 
 ## Claude Code
 
-```bash
-claude plugin marketplace add https://github.com/bb-brain/priors-plugins.git#main/claude
+```powershell
+claude plugin marketplace add https://github.com/brain-nakamichi/priors-plugins.git#main/claude
 claude plugin install priors@priors
 ```
 
-詳細は [`claude/README.md`](./claude/README.md) を参照してください。MCP の利用者 token と hook token は別途設定が必要です。token の値はリポジトリへ書き込まないでください。
+token は設定ファイルへ貼り付けず、案内された安全な環境変数へ設定してください。導入後の接続確認は [Claude 専用ガイド](https://priors-brain9.vercel.app/#/guide-claude) を参照してください。
 
 ## Codex
 
-Codex のプラグイン管理画面またはローカル登録で [`codex/`](./codex/) を指定してください。MCP 接続には `PRIORS_TOKEN_CODEX_V1` 環境変数を使います。
+`codex/` を Codex のプラグイン管理画面またはローカルプラグイン登録から指定します。Windows CLI では `codex.cmd` を使えます。
+
+```powershell
+codex.cmd plugin marketplace add <このリポジトリをcloneした場所>\codex
+codex.cmd plugin add priors@priors
+codex.cmd plugin list
+```
+
+標準経路は同梱スキルと MCP 手順です。利用者用 Codex token は `PRIORS_TOKEN_CODEX_V1` などの安全な環境変数へ設定してください。導入後の接続確認は [Codex 専用ガイド](https://priors-brain9.vercel.app/#/guide-codex) を参照してください。
+
+## 配布版
+
+- Claude plugin: 0.1.4
+- Codex plugin: 0.1.7
+
+Priors サーバーへの接続先は `https://priors-brain9.vercel.app/mcp` です。
 
 ## 配布物に含めないもの
 
-本リポジトリには token、秘密鍵、`.env` ファイル、データベース接続文字列を含めません。Priors サーバーへの接続先は `https://priors-brain9.vercel.app/mcp` です。
+本リポジトリには token、秘密鍵、`.env` ファイル、データベース接続文字列を含めません。

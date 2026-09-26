@@ -1,13 +1,15 @@
 # Priors プラグイン（Claude Code）
 
-契約の正本は `docs/claude-plugin-design.md`（v2）。このプラグインは **SessionStart フックだけ**を配る。
+契約の正本は `docs/claude-plugin-design.md`（v2）。このプラグインは SessionStart の下見と、毎回の UserPromptSubmit 判定リマインドを配る。
 
 ## 何をするか
 
 - セッション開始（`startup` / `resume`）のたびに、設定したテーマの記憶の **下見（プライミング）** を `additionalContext` へ載せる。
 - 下見に載るのは `pinned`（tier A は本文つき、tier B は見出しのみ）・`handoff`・`recent` の 3 枠。逐語・順序維持で、要約や言い換えはしない。
 - **書込は一切しない。** `remember` / `amend` / `checkpoint` / `guard` / `recall` はこのフックからは呼ばない。書込前に `context_open(theme)` を自分で呼ぶことは、下見の固定行が毎回明記する（主テーマの束縛とテーマ切替の確認はそこで行われる）。
-- **Stop フックは無い。** 促しは instructions と skill に置く方針（設計 0 節）。
+- **毎ターン判定**: UserPromptSubmit が use-read / write-candidate / skip の選択を促す。入力本文は保存せず、保留行と SHA-256 だけを `~/.priors/decision-audit.jsonl` に記録し、明示結果は `hooks/record-decision.js --phase turn-start` で追記する。終了時は `--phase conversation-end` を使う。Stop の呼出確認は本文を保存しない `~/.priors/stop-hook.jsonl` に匿名イベントとして記録する。
+- **サーバー側の最後の防波堤**: 書込要求には `session_id` を必須とし、server が同一トランザクション内で `guard` を実行してから `remember` / `amend` / `checkpoint` を実行する。client の `guard` を置き換えるものではない。
+- **会話終了時判定**: 終了イベントでも use-read / write-candidate / skip の判定を促し、未判定のまま終了しない。終了イベント自身は書込せず、write-candidate の次の応答で通常の guard 済み手順へ進む。監査ログには本文を保存しない。
 - 失敗しても会話は止めない。**常に exit 0。**
 - 出力は `{ systemMessage, hookSpecificOutput: { hookEventName, additionalContext } }` の形。`systemMessage` は **top-level**（人向けの短い 1 行、採用した設定ファイルの絶対パスと `pinned`/`handoff`/`recent` の件数を含む）、`additionalContext` が AI 向けの下見データ本体。
 
