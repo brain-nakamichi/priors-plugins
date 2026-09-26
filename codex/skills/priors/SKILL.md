@@ -29,6 +29,20 @@ When a new theme may have been created after the MCP connection started, call
 the read-only `theme_list` tool to refresh the current visible theme list; do
 not infer that an omitted theme does not exist.
 
+## Automatic theme organization
+
+When the user asks to organize, split, or merge memories for a theme, use the
+automatic `theme_organize` MCP tool after the normal `context_open` → `recall`
+→ `guard` sequence. Do not stop at a preview or ask for a second acceptance:
+the tool commits the next generation automatically and is idempotent. First
+refresh with `theme_list`; use its `theme_id` and `current_generation`, and
+include provenance for the conversation summary, project memory, task state,
+and the current/prior Priors generations in `capture`. Supply parent/child and
+other semantic links as candidates. Candidates remain unverified, and source
+memories are never deleted or automatically retracted. If a theme has no
+`theme_id` or generation head, report that it needs generation bootstrap
+instead of guessing identifiers.
+
 Before proposing a material change, read the relevant context with `context_open`
 and `recall`. Before a write, call `guard` and check its result. Keep the active
 theme explicit; do not guess a theme from a short ID or from unrelated text.

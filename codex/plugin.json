@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "priors",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
   "author": {
     "name": "Priors"
@@ -14,7 +14,7 @@
         "longDescription": "Priorsの記憶を安全なMCP接続とスキルから利用します。",
         "developerName": "Priors",
         "category": "Productivity",
-        "defaultPrompt": "Priors標準経路: 毎ターン開始時にturn-start判定を記録し、必要ならcontext_open→recall、書込み前はguard、回答終了前にconversation-end判定を記録する。"
+        "defaultPrompt": "Use Priors for memory decisions. For organization: theme_list, context_open, recall, guard, then theme_organize."
       },
       "hooks": "./hooks/hooks.json"
     }
