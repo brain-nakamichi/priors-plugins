@@ -34,6 +34,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { checkPluginUpdate } = require('./plugin-update-check');
 
 const DEFAULT_MCP_URL = 'https://priors-brain9.vercel.app/mcp';
 const DEFAULT_DEADLINE_MS = 7000;
@@ -646,9 +647,12 @@ const FAILURE_MESSAGES = {
   malformed: () => '応答の形が不正なため下見を省いた',
 };
 
+let startupUpdateNotice = null;
+
 function writeFailure(kind, ...args) {
   const msg = FAILURE_MESSAGES[kind](...args);
-  writeHookOutput(msg, `Priors: ${msg}`);
+  const full = startupUpdateNotice ? `${msg}／${startupUpdateNotice}` : msg;
+  writeHookOutput(full, `Priors: ${full}`);
 }
 
 // ============================================================
@@ -709,6 +713,9 @@ async function main() {
     return;
   }
 
+  // 更新確認はMCP認証やプロジェクト設定から独立させる。失敗時は無通知で続行する。
+  startupUpdateNotice = await checkPluginUpdate(process.env);
+
   // 13: stdin が空・非 JSON でも process.cwd() で続行する（無言で諦めない）
   let stdinRaw = '';
   try {
@@ -730,7 +737,10 @@ async function main() {
   const sessionId = typeof hookInput.session_id === 'string' ? hookInput.session_id : undefined;
 
   const cfg = findConfig(cwd);
-  if (cfg.kind === 'none') return; // 設定が無い → 無言で終了
+  if (cfg.kind === 'none') {
+    if (startupUpdateNotice) writeHookOutput(startupUpdateNotice, `Priors: ${startupUpdateNotice}`);
+    return;
+  } // 設定が無い → 更新通知以外は無言
   if (cfg.kind === 'invalid') {
     writeFailure('config_invalid', cfg.path, CONFIG_INVALID_REASON_TEXT[cfg.reason] || '不明な理由で');
     return;
@@ -789,6 +799,7 @@ async function main() {
   if (themeListUnavailable) {
     sysMsg += '／テーマ一覧が取れず照合を省いた';
   }
+  if (startupUpdateNotice) sysMsg += `／${startupUpdateNotice}`;
 
   writeHookOutput(additionalContext, `Priors: ${sysMsg}`);
 }

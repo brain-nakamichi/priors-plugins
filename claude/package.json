@@ -1,6 +1,6 @@
 {
   "name": "priors-plugin",
-  "version": "0.1.15",
+  "version": "0.1.17",
   "private": true,
   "type": "commonjs",
   "description": "Claude Code plugin: Priors SessionStart hook (下見のみ・書込なし)",

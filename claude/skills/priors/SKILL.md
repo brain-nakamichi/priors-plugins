@@ -23,23 +23,22 @@ description: Priors（長期記憶のMCPサーバー）を毎ターン使うか�
 
 該当時だけ `context_open` → `recall` → 必要なら `guard` → 書込または`checkpoint`を選ぶ。自律Rememberでは確定・低確度を出所つきで保存する。兆候だけでtoolを自動呼出ししたり、本文を自動保存・確定したりしない。`PRIORS_AUTO_RECALL=1` の高確度再開兆候では応答前にRecallする。
 
-通常はClaude/Codexが確度・出所・重複・適用範囲を判断し、確定事項を自動`remember`する。曖昧・低確度もhypothesis／working等の型、低確度・未検証・出所を本文とtags/evidenceへ明記して自動`remember`する。Tier A「プログラム修正時は修正内容を記憶する」を適用し、変更内容・commit・検証・配備状態を含める。`PRIORS_AUTO_REMEMBER=0`のときだけ旧候補箱モードへ戻す。
-
+通常はClaude/Codexが確度・出所・重複・適用範囲を判断し、確定事項を自動`remember`する。曖昧・低確度もhypothesis／working等の型と低確度・未検証・出所を明記して自動`remember`する。Tier A「プログラム修正時は修正内容を記憶する」を適用し、変更内容・commit・検証・配備状態を含める。`PRIORS_AUTO_REMEMBER=0`のときだけ旧候補箱モードへ戻す。
 候補種別ごとの次の確認: Recallは `context_open` → `recall`、Rememberは `guard` → `remember` / `amend`、未解決は `checkpoint`。未検出を不要の証明とみなさず点検する。
 
-Claude の UserPromptSubmit フックはこの判定を毎回リマインドし、通常モードでは入力本文を保存せずハッシュ値と `pending` のみを保留記録する。`PRIORS_AUTO_RECALL=1` の高確度再開兆候では、明示opt-inに基づき設定済みPriors MCPへ入力を送って `context_open → recall` を実行し、結果を追加文脈へ渡す。明示的な結果は、プラグイン内の `hooks/record-decision.js --decision use-read|write-candidate|skip --client claude --phase turn-start|conversation-end --prompt-sha256 <hash>` でローカルの `~/.priors/decision-audit.jsonl` に追記する。ログは Priors 本文と別物で、トークン・本文・接続情報を含めない。
+Claude の UserPromptSubmit フックはこの判定を毎回リマインドし、入力本文は保存せずハッシュ値と `pending` だけを保留記録する。判定は `hooks/record-decision.js --decision use-read|write-candidate|skip --client claude --phase turn-start|conversation-end` でローカルの `~/.priors/decision-audit.jsonl` に追記する。ログは Priors 本文と別物で、トークン・本文・接続情報を含めない。
 
 会話終了前にも判定し、既定の自律Rememberモードでは `context_open` → `recall` → `guard` → `remember` / `amend` を完了する。旧候補モードでは終了イベントを判定のリマインドに使う。監査ログへ判定を記録し、未判定で終了しない。
 終了判定で候補を確認済みにする場合、`use-read` はRecall候補だけを対象にし、Remember/未解決候補を残す。`write-candidate` と `skip` はその時点の候補全体を確認済みにする。
 
-Priorsの存在を前提に、未実装事項・検証・再開条件は`work_item`台帳で自発管理する。「未実装一覧」「残件」「次に進める」では`brief`を呼び、目的・完了条件・対象環境が最も一致するworkを自動選択する。一致しなければ出所を整理して`work_create`する。実装・検証は`work_event`／`verification_recorded`へ追記し、完了は`resolve`、再発は`reopen`で残す。人間の介入はTier変更に限る。本文だけの無関係work作成、検証なしresolve、解決済み記憶の削除は行わない。旧候補モードでは曖昧な候補は提示して選択を待つ。
+未実装事項・検証・再開条件は`work_item`台帳で自発管理する。「未実装一覧」「残件」「次に進める」では`brief`を呼び、目的・完了条件が最も一致するworkを自動選択する。一致しなければ出所を整理して`work_create`する。実装・検証は`work_event`／`verification_recorded`へ追記し、完了は`resolve`、再発は`reopen`で残す。人間の介入はTier変更に限る。検証なしresolveや解決済み記憶の削除はしない。旧候補モードでは曖昧な候補は提示して選択を待つ。
 
 ## 1. 最初に触れる時点で `context_open` を呼ぶ
 
 会話の先頭に Priors の下見（SessionStart フックが積んだデータ）があっても、それは**書込の代わりにならない**。主テーマの束縛もテーマ切替の確認もそこでは行われない。
 
 - **その会話で Priors に最初に触れる時点で**（書込でも、`guard` でも、読取だけでも）自分で `context_open(theme)` を呼ぶ。以後は同じ応答の `resolved_session_id` を `session_id` として使い回す。
-- テーマはサーバー instructions の `themes` から **prefix** で選ぶ（表示名で呼ばない）。似た prefix を手で作らない（似た prefix は `prefix_lookalike` で弾かれる）。目的のテーマが無ければ、その場で作らず管理者にテーマ作成を依頼する（テーマ作成は tool ではなく管理スクリプト）。
+- テーマはサーバー instructions の `themes` から **prefix** で選ぶ（表示名で呼ばない）。似た prefix を手で作らない（`prefix_lookalike` で弾かれる）。目的のテーマが無ければ、その場で作らず管理者にテーマ作成を依頼する。
 - 例: `context_open({ theme: "<prefix>" })`（`<prefix>` は `themes[].prefix` のいずれか）
 
 ## 2. 再開・同期・調査
@@ -93,8 +92,7 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 
 ## 5. 直す：`amend`
 
-内容の訂正・撤回・pin は `remember` の作り直しではなく `amend` で行う（`mode` と `reason` は tool 定義を見る）。
-
+内容の訂正・撤回・pin は `remember` の作り直しではなく `amend` で行う（`mode` と `reason` は tool 定義を見る）。リンクは各要素を `{type, target, note?, dst_version?}` で渡す（例 `{"type":"amends","target":"<prefix>-<n>","dst_version":2}`）。`target` は宛先の短ID、`supports` / `refutes` / `amends` は `dst_version` 必須。`dst_id`・`dst`・`get` が返す `direction` は渡さない（未知キー・`target` 欠落は `invalid_input`）。
 - 訂正は revise、変化時点が説明できる置き換えは supersede、間違いだったので取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証を立てるのは dispute。所有者以外の記憶は変更不可（§3.1）。「消して」と言われたら retract を提案する。実データの削除は管理者へ（tool では消せない）。
 - **pin**: 常に出したい記憶は Tier A、通常の関連記憶は Tier B。Tier A はブラウザの人間による昇格だけが利用でき、Tier B は所有者のエージェントが自律的に設定・変更する。Tier B は `pin_when.tags` または `pin_when.work` の非空条件が必須で、空条件は登録しない。作業種別を選ばせる必須フィルタは使わない。
 

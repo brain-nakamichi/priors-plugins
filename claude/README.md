@@ -154,6 +154,10 @@ MCP 登録には触れていないため、それ以外に戻す作業は無い�
 
 `.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` の `version` を上げてから、`claude plugin install priors@priors` を再実行するとキャッシュへ反映される（`Priors/plugin` がこのプラグインの正本で、インストールはキャッシュへのコピーにすぎない）。
 
+## 起動時の更新通知
+
+SessionStart で公式の Claude 用 `plugin.json` を読み取り専用で確認し、インストール版より新しい場合だけ更新を案内する。通知は同じ版について 24 時間に 1 回に抑制し、通信失敗時は何も通知しない。自動更新、token、MCP 設定の変更は行わない。確認先は `PRIORS_PLUGIN_UPDATE_URL` で変更できるが、HTTPS と許可ホストの検査を通過した URL だけを使う。
+
 ## 限界
 
 - **runtime（Claude Code 本体）にこのフックプロセスが kill されたときは、注記すら出ない。** これは設計上の既知の限界であり、`hooks.json` の `timeout`（15 秒）よりスクリプト内部の deadline を短くしてあるのはこのため。

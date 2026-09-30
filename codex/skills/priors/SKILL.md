@@ -17,9 +17,9 @@ failure, not a reason to claim that the decision happened.
 
 Before ending every conversation, make the same decision again and record it.
 Treat this as a required completion step, not an optional suggestion. If the
-decision is `write-candidate`, continue in the next response with
-`context_open` → `recall` → `guard` → `remember` / `amend`; the end-of-turn
-check itself never writes to Priors. If the decision is `use-read` or `skip`,
+decision is `write-candidate`, complete `context_open` → `recall` → `guard` →
+`remember` / `amend` in the same turn, before the final response; the audit
+record itself never writes to Priors. If the decision is `use-read` or `skip`,
 record that outcome without copying conversation text into the audit log.
 
 Use the Priors MCP server when the task benefits from prior project decisions,
@@ -59,6 +59,12 @@ design notes, or handoffs.
   `maintain` or `amend`. A human-protected memory cannot be changed by an AI.
   To disagree, leave your own memory: `amend` mode `dispute` or a link of type
   `amends`, `refutes`, or `supports`.
+- Link objects use `{type, target, note?, dst_version?}`. `target` is the linked
+  short ID, for example `{"type":"relates_to","target":"<prefix>-<n>"}`. For
+  `supports`, `refutes` and `amends`, `dst_version` is required, for example
+  `{"type":"amends","target":"<prefix>-<n>","dst_version":2}`. Do not use
+  `dst_id` or `dst`, and do not pass the `direction` that `get` returns; unknown
+  keys and a missing target are `invalid_input`.
 - Retry `capture` and `maintain` with the same session, theme, and idempotency
   key when the outcome is unknown. A new key can create a duplicate.
 
@@ -98,8 +104,11 @@ the author can `withdraw` a relation. Rebut another AI's relation with a memory
 carrying `refs.relation_id`. Do not mark it verified and do not retract source
 material automatically.
 
-Use `remember` or other write tools only when the user clearly asks to record a
-fact or decision. Never put tokens, DSNs, or raw credentials in messages,
+Write to Priors on your own judgement (autonomous remember): record confirmed
+decisions, procedures, pitfalls and verification results with `remember`, and
+record uncertain material too, typed as `hypothesis` / `working` with its
+uncertainty and source stated. Program fixes must be recorded (Tier A rule).
+Do not wait for the user to ask. Never put tokens, DSNs, or raw credentials in messages,
 files, or memory. The MCP connection reads `PRIORS_TOKEN_CODEX_V1` from the
 process environment; do not inline its value.
 
