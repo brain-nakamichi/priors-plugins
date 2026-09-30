@@ -24,4 +24,23 @@ function recordDecision({ decision, client = 'codex', promptHash, source = 'expl
 function lastAuditEvent(env = process.env) {
   try { const lines = fs.readFileSync(auditPath(env), 'utf8').trim().split(/\r?\n/).filter(Boolean); return lines.length ? JSON.parse(lines.at(-1)) : null; } catch { return null; }
 }
-module.exports = { hashPrompt, recordDecision, lastAuditEvent };
+function auditHealth(env = process.env, maxLines = 256) {
+  let lines;
+  try { lines = fs.readFileSync(auditPath(env), 'utf8').trim().split(/\r?\n/).filter(Boolean).slice(-maxLines); }
+  catch { return { events: 0, invalid_lines: 0, pending_turn_starts: 0, pending_conversation_end: 0 }; }
+  let invalid_lines = 0; let events = 0; let pending_turn_starts = 0; let pending_conversation_end = 0;
+  for (const line of lines) {
+    let event; try { event = JSON.parse(line); } catch { invalid_lines++; continue; }
+    if (!event || event.schema !== 'priors.decision-audit.v1' || !DECISIONS.has(event.decision) || !PHASES.has(event.phase)) { invalid_lines++; continue; }
+    events++;
+    if (event.decision === 'pending') {
+      if (event.phase === 'turn-start') pending_turn_starts++;
+      if (event.phase === 'conversation-end') pending_conversation_end++;
+    } else if (event.source === 'explicit') {
+      if (event.phase === 'turn-start' && pending_turn_starts > 0) pending_turn_starts--;
+      if (event.phase === 'conversation-end' && pending_conversation_end > 0) pending_conversation_end--;
+    }
+  }
+  return { events, invalid_lines, pending_turn_starts, pending_conversation_end };
+}
+module.exports = { hashPrompt, recordDecision, lastAuditEvent, auditHealth };

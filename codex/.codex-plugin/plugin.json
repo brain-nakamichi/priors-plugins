@@ -1,20 +1,20 @@
 {
   "name": "priors",
-  "version": "0.1.9",
-  "description": "Priors plugin",
+  "version": "0.1.18",
+  "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
   "author": {
-    "name": "Local developer"
+    "name": "Priors"
   },
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Priors",
-    "shortDescription": "Use Priors in Codex.",
-    "longDescription": "Priors adds a local Codex plugin scaffold.",
-    "developerName": "Local developer",
+    "shortDescription": "Priorsの記憶をCodexで使う",
+    "longDescription": "Priors adds practical memory support through the local MCP connection and skills.",
+    "developerName": "Priors",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "At the start of every turn, run scripts/record-turn-start.js, decide use-read/write-candidate/skip, and record it with --phase turn-start. Before the final response, make and record a second decision with --phase conversation-end."
+    "defaultPrompt": "Use Priors for practical memory support. Resume with brief after explicit work selection; use consult for evidence, counterpoints, bounded relations, and guard; synchronize full or delta according to retained context."
   },
   "mcpServers": "./.mcp.json"
 }

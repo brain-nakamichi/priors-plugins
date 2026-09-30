@@ -7,9 +7,30 @@
 - セッション開始（`startup` / `resume`）のたびに、設定したテーマの記憶の **下見（プライミング）** を `additionalContext` へ載せる。
 - 下見に載るのは `pinned`（tier A は本文つき、tier B は見出しのみ）・`handoff`・`recent` の 3 枠。逐語・順序維持で、要約や言い換えはしない。
 - **書込は一切しない。** `remember` / `amend` / `checkpoint` / `guard` / `recall` はこのフックからは呼ばない。書込前に `context_open(theme)` を自分で呼ぶことは、下見の固定行が毎回明記する（主テーマの束縛とテーマ切替の確認はそこで行われる）。
-- **毎ターン判定**: UserPromptSubmit が use-read / write-candidate / skip の選択を促す。入力本文は保存せず、保留行と SHA-256 だけを `~/.priors/decision-audit.jsonl` に記録し、明示結果は `hooks/record-decision.js --phase turn-start` で追記する。終了時は `--phase conversation-end` を使う。Stop の呼出確認は本文を保存しない `~/.priors/stop-hook.jsonl` に匿名イベントとして記録する。
+- **毎ターン判定**: 既定の自律RememberモードではClaude/Codexが use-read / 自動remember / skip を判断する。`PRIORS_AUTO_REMEMBER=0` の旧候補モードだけ UserPromptSubmit が use-read / write-candidate / skip の選択を促す。入力本文は保存せず、保留行と SHA-256 だけを `~/.priors/decision-audit.jsonl` に記録し、明示結果は `hooks/record-decision.js --phase turn-start` で追記する。終了時は `--phase conversation-end` を使う。Stop の呼出確認は本文を保存しない `~/.priors/stop-hook.jsonl` に匿名イベントとして記録する。
+- **自発候補の促し**: UserPromptSubmit は本文を外部送信・保存せず、再開・既存仕様・決定・実装・未解決・作業台帳候補などのローカル兆候を `recall-likely` / `remember-candidate` / `unresolved-candidate` / `work-item-candidate` に分類する。分類はtool呼出や自動保存を決めず、AIが必要性と出所を確認するためのヒントだけを返す。
+- **opt-in自動Recall**: `PRIORS_AUTO_RECALL=1`を明示設定した場合、高確度の再開・既存仕様兆候に限り、フックが設定済みPriors MCPへ `initialize → context_open → recall` を実行し、結果を追加文脈として渡す。これは明示opt-in時だけ会話入力をPriorsへ送る。Rememberや候補確定、曖昧なwork選択は自動実行しない。`PRIORS_AUTO_RECALL_LIVE=0` は回帰テスト用のネットワーク無効化である。
+- **自律Remember**: 通常は確定事項を自動保存し、曖昧・低確度も`hypothesis`／`working`等の型と低確度・未検証・出所を明記して通常の `context_open → recall → guard → remember/amend` で自動保存する。受信箱は通常経路にしない。Tier Aのプログラム修正記憶は必須で、commit・テスト・配備状態を含める。`PRIORS_AUTO_REMEMBER=0`のときだけ旧候補箱モードへ戻す。
+- 継続指示の扱い: 「次進めてください」「続きを実装してください」のような継続指示も `work-item-candidate` として扱い、既存 work の `brief` または work ID の確認を促す。単独の「次」は未解決候補にはしない。
+- **旧候補キュー**: `PRIORS_AUTO_REMEMBER=0` のときだけ、`recall-likely` / `remember-candidate` / `unresolved-candidate` の兆候を本文なしの SHA-256・カテゴリ・信頼度メタデータとして `~/.priors/proactive-candidates.jsonl`（`PRIORS_PROACTIVE_CANDIDATE_FILE`で上書き可）へ追記する。Stop時はカテゴリ別件数を表示し、高確度候補がある場合は先に確認するよう促す。既定の自律Rememberモードではこの候補箱を通常経路にしない。
+- conversation-end の明示判定後は候補へ `reviewed_at` と判定種別だけを付け、同じ候補を再通知しない。候補本文や入力tokenは追加保存しない。
+- Stop時に保留中の `remember-candidate` を本文なしの `priors.remember-candidate.v1` へ一件に集約する。候補ID、元候補ID、入力ハッシュ、信頼度、`confirmation_state=pending`、次の確認手順だけを保存し、自動確定やPriorsへの自動書込は行わない。
+- 利用者が候補IDとレビュー済みの完全なRemember payloadを明示した場合だけ `hooks/confirm-remember.js` で確認し、本文をローカル候補へ保存せず、通常の `remember` 呼出し用payloadを返す。候補から本文・namespace・種別を推測せず、未保留候補や不正payloadは拒否する。
+  `--candidate-id <候補ID> --payload-file <レビュー済みJSON>` または同じ内容のJSON標準入力を使える。
+- `hooks/list-proactive-candidates.js` は保留中のRecall／Remember／作業候補を候補ID・カテゴリ・信頼度・次手だけで一覧化する。入力本文、ハッシュ、Remember payload、tokenは出力しない。
+- `hooks/acknowledge-proactive-candidates.js --decision use-read|write-candidate|skip` は明示した判定だけを候補キューへ記録する。`use-read` はRecall候補だけを確認済みにし、Remember・未解決・作業候補を残す。無効な判定は拒否する。
+- Stop時の未解決候補は本文なしのcheckpoint候補へ集約される。`hooks/confirm-checkpoint.js --candidate-id <候補ID> --payload-file <レビュー済みJSON>` またはJSON標準入力で、明示したcheckpoint payloadだけを確認済みにできる。
+- Stop時に保留中の `work-item-candidate` も本文なしの `priors.work-item-candidate.v1` へ一件に集約する。work IDは推測せず、`brief`（work IDなし）→利用者の明示選択→`work_event`／`verification_recorded`へ進む。
+- 利用者が候補IDと実在するwork IDを明示した場合だけ `hooks/confirm-work-item.js --candidate-id <候補ID> --work-id <work ID>` で候補を `confirmed` にできる。これは確認記録だけで、workの自動作成・resolve・DB書込みは行わない。
+  同じ `{ "candidate_id": "…", "work_id": "…" }` のJSON標準入力も使える。
+- `hooks/select-work-item.js` は `brief` の `work_candidates` と会話目的を受け取り、目的・完了条件・対象環境の語の一致が最も高いworkを決定的に選ぶ。候補が一致しない場合は `create_required=true` を返し、work_createの入力整理へ進める。workのresolveやDB書込みは行わない。
+- `hooks/prepare-work-create.js` は一致workが無い場合に、theme・目的・対象環境・完了条件・次の一手・session_id・冪等キーを検査した`work_create` payloadへ整形する。CLIはMCPを直接呼ばず、serverの認可・guard・idempotency検査へ渡す前段だけを担う。
+- `hooks/route-work-item.js` はbrief候補と目的を受け、既存workなら`work_event`、一致しなければ検査済み`work_create` payloadへ決定的に分岐する。実行自体はserver MCPへ渡し、CLIはDBを書き込まない。
+- 確認済み候補は `hooks/prepare-work-event.js` で event type・expected version・basis・検証環境を検査したpayloadへ変換できる。これはDB呼出しを行わず、serverの`append_work_event`へ同じwork ID・版で渡す前段だけを担う。
+- `use-read` は Recall 候補だけを確認済みにし、Remember/未解決候補は残す。`write-candidate` と `skip` はその時点の候補全体を確認済みにする。
 - **サーバー側の最後の防波堤**: 書込要求には `session_id` を必須とし、server が同一トランザクション内で `guard` を実行してから `remember` / `amend` / `checkpoint` を実行する。client の `guard` を置き換えるものではない。
-- **会話終了時判定**: 終了イベントでも use-read / write-candidate / skip の判定を促し、未判定のまま終了しない。終了イベント自身は書込せず、write-candidate の次の応答で通常の guard 済み手順へ進む。監査ログには本文を保存しない。
+- **会話終了時判定**: 既定の自律Rememberモードでは終了前に通常の `context_open → recall → guard → remember/amend` を完了させる。`PRIORS_AUTO_REMEMBER=0` の旧候補モードだけ終了イベントで use-read / write-candidate / skip の判定を促し、未判定のまま終了しない。監査ログには本文を保存しない。
+- **日常利用**: 曖昧な再開は `brief` の候補を提示してworkを明示選択する。保持が確かな会話だけdeltaを使い、圧縮後はfullへ戻す。`capture`（保存方針は廃止・すべて確定で登録）と版固定の`maintain`は、通常の`context_open`・`guard`を通す。Tier B は所有者の Claude / Codex が自律管理し、Tier A は人間の明示指示を AI が実行する場合だけ変更する。承認待ち候補は作らず、別主体の記憶への意見は`dispute`か`amends`・`refutes`・`supports`のリンク付きの新しい記憶で追記する。
 - 失敗しても会話は止めない。**常に exit 0。**
 - 出力は `{ systemMessage, hookSpecificOutput: { hookEventName, additionalContext } }` の形。`systemMessage` は **top-level**（人向けの短い 1 行、採用した設定ファイルの絶対パスと `pinned`/`handoff`/`recent` の件数を含む）、`additionalContext` が AI 向けの下見データ本体。
 
@@ -60,7 +81,7 @@ chmod 600 ~/.secrets/priors-hook-token
 ```
 
 - `theme`: `initialize` が返す可視テーマの prefix（例: `GEN`）。テーマ scope のみ（owner/workspace は指定できない）。
-- `work_kinds`: 省略可。pinned 枠 tier B の絞り込み条件（作業種別）。**server 側の allowlist（`priors.work_kind`）による照合を受ける。** ここで書いた値が server 側に存在しない場合、`context_open` は `invalid_input` として拒否され、フックは「呼出しが拒否された」旨を注記する。
+- `work_kinds`: 互換入力。通常の利用では指定しない。Tier B は作業種別を選択しなくても関連度で想起され、必要な場合だけ任意の検索ヒントとして使う。
 
 **存在しないときだけ次の候補（`priors.json`）を見る。存在するのに壊れている（JSON として読めない・`theme` が大文字始まりの英数字でない 等）場合は fallback せず、そのファイルの絶対パスと理由を注記して終える。** 無言で握りつぶさない。
 

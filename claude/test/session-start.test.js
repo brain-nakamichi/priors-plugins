@@ -381,6 +381,31 @@ test('(c) 成功時: 固定行・表示名・pinned/handoff/recent・coverage・
   }
 });
 
+// 段5: annotations 枠は hook では計算しないので、予算は既定合計 2500 から 200 を引いた 2300
+test('(c2) context_open の budget_tokens は 2300（annotations 枠を hook では計算しない）', async () => {
+  let args = null;
+  const server = await startFakeServer(makeHandler({
+    themes: SAMPLE_THEMES, warnings: [], payload: samplePayload(),
+    onContextOpen: (parsed) => {
+      args = parsed.params.arguments;
+      return contextOpenOk(parsed.id, samplePayload());
+    },
+  }));
+  try {
+    const dir = mkTmpDir();
+    writeConfig(dir, 'priors.json', { theme: 'GEN' });
+    const { code } = await runHook({
+      cwd: dir,
+      env: { PRIORS_HOOK_TOKEN_V1: DUMMY_TOKEN, PRIORS_MCP_URL: serverUrl(server) },
+      stdinObj: { cwd: dir, session_id: 'sess-budget', hook_event_name: 'SessionStart' },
+    });
+    assert.equal(code, 0);
+    assert.equal(args.budget_tokens, 2300);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 // ============================================================
 // (d) テーマ不明の注記（context_open が呼ばれないこと）
 // ============================================================

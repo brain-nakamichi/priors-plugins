@@ -70,7 +70,29 @@ function lastAuditEvent(env = process.env) {
   }
 }
 
+function auditHealth(env = process.env, maxLines = 256) {
+  const file = auditPath(env);
+  let lines;
+  try { lines = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).filter(Boolean).slice(-maxLines); }
+  catch { return { events: 0, invalid_lines: 0, pending_turn_starts: 0, pending_conversation_end: 0 }; }
+  let invalid = 0; let events = 0; let turnPending = 0; let endPending = 0;
+  for (const line of lines) {
+    let event;
+    try { event = JSON.parse(line); } catch { invalid++; continue; }
+    if (!event || event.schema !== 'priors.decision-audit.v1' || !DECISIONS.has(event.decision) || !PHASES.has(event.phase)) { invalid++; continue; }
+    events++;
+    if (event.decision === 'pending') {
+      if (event.phase === 'turn-start') turnPending++;
+      if (event.phase === 'conversation-end') endPending++;
+    } else if (event.source === 'explicit') {
+      if (event.phase === 'turn-start' && turnPending > 0) turnPending--;
+      if (event.phase === 'conversation-end' && endPending > 0) endPending--;
+    }
+  }
+  return { events, invalid_lines: invalid, pending_turn_starts: turnPending, pending_conversation_end: endPending };
+}
+
 module.exports = {
   DECISIONS, PHASES, auditPath, stopDiagnosticPath, hashPrompt,
-  recordDecision, recordStopInvocation, lastAuditEvent,
+  recordDecision, recordStopInvocation, lastAuditEvent, auditHealth,
 };

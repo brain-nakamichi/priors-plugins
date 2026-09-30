@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "priors",
-  "version": "0.1.9",
+  "version": "0.1.18",
   "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
   "author": {
     "name": "Priors"
@@ -14,7 +14,7 @@
         "longDescription": "Priorsの記憶を安全なMCP接続とスキルから利用します。",
         "developerName": "Priors",
         "category": "Productivity",
-        "defaultPrompt": "Use Priors for memory decisions. For organization: theme_list, context_open, recall, guard, then theme_organize."
+        "defaultPrompt": "Use Priors for practical memory support. Resume with brief after explicit work selection; use consult for evidence, counterpoints, bounded relations, and guard; synchronize full or delta according to retained context."
       },
       "hooks": "./hooks/hooks.json"
     }
