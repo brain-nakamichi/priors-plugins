@@ -5,7 +5,7 @@
 ## Claude Code
 
 ```powershell
-claude plugin marketplace add https://github.com/brain-nakamichi/priors-plugins.git#main/claude
+claude plugin marketplace add https://github.com/brain-nakamichi/priors-plugins.git
 claude plugin install priors@priors
 ```
 
