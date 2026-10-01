@@ -46,3 +46,38 @@ export async function checkPluginUpdate(env = process.env) {
     return `Priorsプラグインに更新があります（Codex: ${current} → ${latest}）。CodexのPriors marketplaceを更新してからプラグインを再インストールし、Codexを再起動してください。token・MCP設定は変更しません。`;
   } catch { return null; } finally { clearTimeout(timer); }
 }
+
+// GEN-542 (Codex review): the Codex SessionStart does not otherwise talk to the server, so this hook performs its own
+// MCP initialize, names the plugin (clientInfo priors-plugin-codex + version) and compares with priors_contract.
+// Token comes from the same env var the MCP config uses; it is sent as a header and never printed. Failures are silent.
+const DEFAULT_MCP_URL = 'https://priors-brain9.vercel.app/mcp';
+function allowedMcpUrl(raw, env) {
+  try {
+    const u = new URL(raw); if (u.protocol !== 'https:') return null;
+    const extra = String(env.PRIORS_MCP_ALLOWED_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!new Set(['priors-brain9.vercel.app', ...extra]).has(u.hostname.toLowerCase())) return null; return u;
+  } catch { return null; }
+}
+export async function checkPluginContract(env = process.env) {
+  const token = env.PRIORS_TOKEN_CODEX_V1; const url = allowedMcpUrl(env.PRIORS_MCP_URL || DEFAULT_MCP_URL, env);
+  if (!token || !url || typeof fetch !== 'function') return null;
+  const current = currentVersion();
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), Number(env.PRIORS_PLUGIN_UPDATE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: 'POST', redirect: 'error', signal: controller.signal,
+      headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {},
+        clientInfo: { name: 'priors-plugin-codex', version: current } } }) });
+    if (!res.ok) return null; const text = await res.text(); if (Buffer.byteLength(text, 'utf8') > MAX_BODY) return null;
+    const result = (JSON.parse(text) || {}).result; if (!result || typeof result !== 'object') return null;
+    const contract = result.priors_contract || (result._meta && result._meta.priors_contract) || null;
+    const minimum = contract && contract.minimum_plugin ? contract.minimum_plugin[CLIENT] : undefined;
+    const flagged = Array.isArray(result.warnings) && result.warnings.includes('plugin_outdated');
+    if (!(flagged || (parseVersion(minimum) && newer(minimum, current)))) return null;
+    const required = parseVersion(minimum) ? minimum : 'server が要求する版';
+    const file = statePath(env); const state = readState(file); const now = Date.now(); const key = `${CLIENT}-contract`; const previous = state[key];
+    if (previous && previous.version === required && now - Number(previous.notifiedAt) < NOTIFY_INTERVAL_MS) return null;
+    state[key] = { version: required, notifiedAt: now }; writeState(file, state);
+    return `Priorsサーバーはプラグイン ${required} 以上を要求しています（Codex: ${current}）。CodexのPriors marketplaceを更新してからプラグインを再インストールし、Codexを再起動してください。token・MCP設定は変更しません。`;
+  } catch { return null; } finally { clearTimeout(timer); }
+}

@@ -409,6 +409,9 @@ async function fetchPriorsContext(url, token, theme, workKinds, sessionId, deadl
     } else {
       instructionsUnavailable = true;
     }
+    // GEN-542: compare with the server's minimum version here, before context_open, so a failing context_open
+    // (old plugin → invalid_input etc.) still ends with the update notice
+    startupContractNotice = checkPluginContract(priorsContract, initWarnings, process.env);
 
     const themeListUnavailable = instructionsUnavailable || initWarnings.includes('theme_list_unavailable');
     const themeInfo = themes.find((t) => t && typeof t === 'object' && t.prefix === theme) || null;
@@ -654,10 +657,14 @@ const FAILURE_MESSAGES = {
 };
 
 let startupUpdateNotice = null;
+// GEN-542 (Codex review): the server-contract notice is computed right after initialize so that it is shown even
+// when context_open then fails (an old plugin is exactly what makes context_open fail with invalid_input)
+let startupContractNotice = null;
 
 function writeFailure(kind, ...args) {
   const msg = FAILURE_MESSAGES[kind](...args);
-  const full = startupUpdateNotice ? `${msg}／${startupUpdateNotice}` : msg;
+  const notices = [startupUpdateNotice, startupContractNotice].filter(Boolean);
+  const full = notices.length > 0 ? `${msg}／${notices.join('／')}` : msg;
   writeHookOutput(full, `Priors: ${full}`);
 }
 
@@ -806,9 +813,8 @@ async function main() {
     sysMsg += '／テーマ一覧が取れず照合を省いた';
   }
   if (startupUpdateNotice) sysMsg += `／${startupUpdateNotice}`;
-  // GEN-542: server が要求する最低版との比較（GitHub 確認が届かなくても server だけで気づける）
-  const contractNotice = checkPluginContract(result.priorsContract, result.initWarnings, process.env);
-  if (contractNotice) sysMsg += `／${contractNotice}`;
+  // GEN-542: server が要求する最低版との比較（initialize 直後に計算済み。GitHub 確認が届かなくても server だけで気づける）
+  if (startupContractNotice) sysMsg += `／${startupContractNotice}`;
 
   writeHookOutput(additionalContext, `Priors: ${sysMsg}`);
 }

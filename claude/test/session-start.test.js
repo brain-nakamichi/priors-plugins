@@ -1191,3 +1191,34 @@ test('(j2) priors_contract を満たしていれば案内しない', async () =>
     await closeServer(server);
   }
 });
+
+// GEN-542（Codex レビュー）: 契約の案内は initialize 直後に決まるので、その後の context_open が失敗しても出る
+test('(j3) context_open が失敗しても server 契約の更新案内は出る', async () => {
+  const server = await startFakeServer((parsed) => {
+    if (parsed && parsed.method === 'initialize') {
+      const ok = initializeOk(parsed.id, SAMPLE_THEMES, ['plugin_outdated']);
+      ok.body.result.priors_contract = { server_contract: '9.9.9', minimum_plugin: { claude: '9.9.9', codex: '9.9.9' } };
+      return ok;
+    }
+    if (parsed && parsed.method === 'tools/call') {
+      return { status: 200, body: { jsonrpc: '2.0', id: parsed.id, result: { isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ error: 'invalid_input', details: { field: 'budget_tokens' } }) }] } } };
+    }
+    return { status: 404, body: { jsonrpc: '2.0', id: parsed && parsed.id, error: { code: -32601, message: 'unexpected' } } };
+  });
+  try {
+    const dir = mkTmpDir();
+    writeConfig(dir, 'priors.json', { theme: 'GEN' });
+    const { stdout, code } = await runHook({
+      cwd: dir,
+      env: { PRIORS_HOOK_TOKEN_V1: DUMMY_TOKEN, PRIORS_MCP_URL: serverUrl(server), PRIORS_PLUGIN_UPDATE_STATE_FILE: path.join(dir, 's.json') },
+      stdinObj: { cwd: dir, session_id: 'sess-real', hook_event_name: 'SessionStart' },
+    });
+    assert.equal(code, 0);
+    const out = parseHookOutput(stdout);
+    assert.match(out.systemMessage, /invalid_input/);
+    assert.match(out.systemMessage, /Priorsサーバーはプラグイン 9\.9\.9 以上を要求しています/);
+  } finally {
+    await closeServer(server);
+  }
+});
