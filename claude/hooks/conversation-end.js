@@ -58,15 +58,15 @@ try {
   const checkpointReady = pendingCheckpointCandidates().length;
   process.stdout.write(JSON.stringify({
     systemMessage: autonomousRemember
-      ? 'Priors: 自律Rememberモード。確定した修正・決定は通常手順で自動記憶します。'
+      ? 'Priors: 自律Rememberモード。次の会話で役立つ内容（相談・比較案・仮説・未決定を含む）を保存し、成功応答の ID・版を確認して記録します。'
       : 'Priors: 会話終了時の判定を行ってください（use-read / write-candidate / skip）。',
     hookSpecificOutput: {
       hookEventName: 'Stop',
       additionalContext: [
         autonomousRemember
-          ? 'Priors自律Remember（必須）: 確定した修正・決定・検証結果は context_open → recall → guard → remember/amend を実行する。Tier Aのプログラム修正記憶を省略しない。'
+          ? 'Priors自律Remember（必須）: 質問・要望とこの応答を合わせて「次の会話で覚えていると役立つか」を点検し、役立つなら「記憶して」を待たずに context_open → recall → guard → remember/amend（長期）または working_cache_write（今回だけの途中経過）で保存する。未決定の相談・比較案・仮説も対象。要旨は「求めたこと／AIの提案・判断／未決定の点／再開の手がかり」で、提案を決定として書かない。Tier Aのプログラム修正記憶を省略しない。'
           : 'Priors終了時判定（必須）: この会話で残すべき確定事項があるか判断する。',
-        'use-read / write-candidate / skip のいずれかを選び、record-decision.js --phase conversation-end でローカル監査ログへ記録する。',
+        'use-read / write-candidate / skip のいずれかを選び、record-decision.js --phase conversation-end でローカル監査ログへ記録する。保存したときは成功応答の ID・版を確認してから --save-result recorded --saved <id@version,...> を添える。失敗は --save-result failed として残し本来の回答は続ける。保存不要なら --save-result not_needed。「保存する」と記録しただけでは完了にしない。',
         'write-candidate の場合は、下記の候補別手順だけを確認し、該当しない操作を連鎖させない。',
         candidateSummary.total > 0
           ? `本文を保存しない自動候補キューが ${candidateSummary.total} 件あります（高確度 ${candidateSummary.high_confidence} 件、Recall候補 ${candidateSummary.categories['recall-likely']} 件、Remember候補 ${candidateSummary.categories['remember-candidate']} 件、未解決候補 ${candidateSummary.categories['unresolved-candidate']} 件、作業台帳候補 ${candidateSummary.categories['work-item-candidate']} 件）。${rememberReady > 0 ? `会話終了Remember候補を ${rememberReady} 件生成しました。` : ''}${workReady > 0 ? `作業台帳候補を ${workReady} 件生成しました。` : ''}${checkpointReady > 0 ? `checkpoint候補を ${checkpointReady} 件生成しました。` : ''}出所と不確実性を確認し、必要な候補だけを通常手順で扱う。`

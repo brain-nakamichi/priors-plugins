@@ -24,9 +24,22 @@ function hashPrompt(prompt) {
   return crypto.createHash('sha256').update(String(prompt || ''), 'utf8').digest('hex');
 }
 
-function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown' }, env = process.env) {
+// GEN-554: a decision to save is not a save. The conversation-end record may carry what the server actually
+// answered: the outcome and the ids (memory id@version, cache id) — never bodies, tokens or connection strings.
+const SAVE_OUTCOMES = new Set(['recorded', 'failed', 'not_needed']);
+const SAVE_ID = /^[A-Za-z0-9_:@.-]{1,80}$/;
+function normalizeSave(save) {
+  if (save === undefined || save === null) return undefined;
+  if (typeof save !== 'object') throw new Error('invalid save');
+  if (!SAVE_OUTCOMES.has(save.outcome)) throw new Error('invalid save outcome');
+  const ids = Array.isArray(save.ids) ? save.ids.filter((x) => typeof x === 'string' && SAVE_ID.test(x)).slice(0, 20) : [];
+  return { outcome: save.outcome, ids };
+}
+
+function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown', save }, env = process.env) {
   if (!DECISIONS.has(decision)) throw new Error('invalid decision');
   if (!PHASES.has(phase)) throw new Error('invalid phase');
+  const saveRecord = normalizeSave(save);
   const file = auditPath(env);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const event = {
@@ -38,6 +51,7 @@ function recordDecision({ decision, client, promptHash, source = 'explicit', pha
     phase,
     ...(typeof promptHash === 'string' && /^[0-9a-f]{64}$/.test(promptHash)
       ? { prompt_sha256: promptHash } : {}),
+    ...(saveRecord ? { save: saveRecord } : {}),
   };
   fs.appendFileSync(file, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
   try { fs.chmodSync(file, 0o600); } catch { /* Windows / ACLs: best effort */ }

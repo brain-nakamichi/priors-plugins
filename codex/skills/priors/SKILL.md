@@ -118,11 +118,20 @@ the author can `withdraw` a relation. Rebut another AI's relation with a memory
 carrying `refs.relation_id`. Do not mark it verified and do not retract source
 material automatically.
 
-Write to Priors on your own judgement (autonomous remember): record confirmed
-decisions, procedures, pitfalls and verification results with `remember`, and
-record uncertain material too, typed as `hypothesis` / `working` with its
-uncertainty and source stated. Program fixes must be recorded (Tier A rule).
-Do not wait for the user to ask. Never put tokens, DSNs, or raw credentials in messages,
+Write to Priors on your own judgement (autonomous remember). The test is
+"will this help in the next conversation?", not "is it settled?". When an
+answer is ready, review the user's question or request together with your
+answer; if remembering it helps later, save it without waiting for "remember
+this" — undecided consultations, comparisons and hypotheses included (typed
+`hypothesis` / `working`, with uncertainty and source). Lasting requests,
+design deliberations and lessons go to `remember`; in-progress state and the
+next thing to check go to `working_cache_write`; greetings and repeats can be
+skipped. Keep the summary short: what the user asked / what you proposed or
+judged / what is undecided or unverified / how to resume. Never record a
+proposal as an adopted decision. A save counts only when the server's success
+response (memory id and version, or cache id) came back; record the outcome
+with `record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <ids>`
+and keep answering even if a save fails. Program fixes must be recorded (Tier A rule). Never put tokens, DSNs, or raw credentials in messages,
 files, or memory. The MCP connection reads `PRIORS_TOKEN_CODEX_V1` from the
 process environment; do not inline its value.
 

@@ -56,7 +56,7 @@ function proactiveGuidance(signals, prompt = '', env = process.env) {
       : '高確度の再開・既存仕様兆候: 応答前に context_open → recall を先に実行');
   }
   if (signals.includes('remember-candidate') && /(?:決定|採択|方針|正式|完了|採用|実装した)/u.test(prompt)) {
-    guidance.push('高確度のRemember兆候: 出所を確認し、会話終了前に guard → remember/amend を実行');
+    guidance.push('高確度のRemember兆候: 出所を確認し、会話終了前に guard → remember/amend を実行し、成功応答の ID・版を記録する');
   }
   if (signals.includes('unresolved-candidate') && /(?:未解決|保留|残件|次の一手|次回|次に残る)/u.test(prompt)) {
     guidance.push('高確度の未解決兆候: 会話終了前に checkpoint または問いの確認を実行');
@@ -64,7 +64,7 @@ function proactiveGuidance(signals, prompt = '', env = process.env) {
   if (signals.includes('work-item-candidate') && /(?:未実装一覧|未実装|残件|未解決の課題|次に進める|次進めて|続きを|作業台帳)/u.test(prompt)) {
     guidance.push('高確度の作業台帳兆候: 応答前に brief で目的・完了条件が最も一致するworkを自動選択し、該当がなければ work_create を検討');
   }
-  if (signals.includes('remember-candidate')) guidance.push('確定事項か出所を確認してから guard → remember/amend を検討');
+  if (signals.includes('remember-candidate')) guidance.push('次の会話で役立つなら（未決定の相談でも）guard → remember/amend か working_cache_write を検討');
   if (signals.includes('unresolved-candidate')) guidance.push('未解決の問い・残件なら checkpoint または問いの記憶化を検討');
   if (signals.includes('work-item-candidate')) guidance.push('作業台帳候補なら brief で一致するworkを自動選択し、該当がなければ work_create を検討');
   return guidance.length > 0 ? ` 次の確認: ${guidance.join('。')}。` : '';
@@ -99,7 +99,7 @@ try {
     '使わないなら skip。判断結果を record-decision.js --phase turn-start でローカル監査ログへ記録し、Priors本文には書かない。',
     process.env.PRIORS_AUTO_REMEMBER === '0'
       ? '下見や会話本文だけを根拠に書込を自動実行せず、書込前の guard を省略しない。'
-      : '自律Rememberモード: 確定事項は自動rememberし、曖昧・低確度はhypothesis/working等の型と不確実性・出所を付けて保存する。Tier Aのプログラム修正記憶を省略しない。',
+      : '自律Rememberモード: 「確定したか」ではなく「次の会話で役立つか」で保存する。質問・要望とこの応答を合わせて点検し、役立つなら「記憶して」を待たずに remember（長期）か working_cache_write（今回だけ）へ。未決定・仮説は型と不確実性・出所を付ける。保存は成功応答の ID・版を確認して記録する。Tier Aのプログラム修正記憶を省略しない。',
     signals.length > 0
       ? `自発候補（出所: local-heuristic、信頼度: ${confidence === 'high' ? '高' : '低'}、本文は送信・保存していない）: ${signals.join(', ')}。recallの要否、再利用価値のあるremember候補、未解決事項を自分で確認する。兆候だけで確定せず、出所と不確実性を確認する。${proactiveGuidance(signals, prompt, process.env)}`
       : '自発候補（出所: local-heuristic、信頼度: 低）: 強い兆候は検出されなかった。未検出は不要の証明ではないため、既存文脈が必要か、将来再利用する確定事項があるかを自分で確認する。',
