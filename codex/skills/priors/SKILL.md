@@ -67,6 +67,11 @@ design notes, or handoffs.
   keys and a missing target are `invalid_input`.
 - Retry `capture` and `maintain` with the same session, theme, and idempotency
   key when the outcome is unknown. A new key can create a duplicate.
+- In a shared theme: an answered question shows `answered_by` in `brief`;
+  its owner closes it with `maintain` resolve. `checkpoint` replaces your
+  latest handoff in the theme by default; pass `supersede_previous: false`
+  when other work of yours is in flight and read `resource_ids` (replaced).
+  Unblock a work by sending the next event with `status: in_progress`.
 
 When a new theme may have been created after the MCP connection started, call
 the read-only `theme_list` tool to refresh the current visible theme list; do
