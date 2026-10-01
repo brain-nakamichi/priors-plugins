@@ -1125,3 +1125,69 @@ test('囲いの nonce が BEGIN/END で一致し、記憶データ中の偽の�
 test('node --check がとおる', () => {
   assert.ok(true);
 });
+
+// GEN-542: server の initialize が priors_contract を返し、自身の版が最低版未満なら systemMessage で案内する。
+// 名乗りは priors-plugin-claude ＋ plugin.json の版。GitHub 確認とは別に、server だけで気づける
+test('(j) priors_contract の最低版より古ければ案内し、clientInfo はプラグイン名と版を名乗る', async () => {
+  const seen = [];
+  const server = await startFakeServer((parsed) => {
+    if (parsed && parsed.method === 'initialize') {
+      seen.push(parsed.params && parsed.params.clientInfo);
+      const ok = initializeOk(parsed.id, SAMPLE_THEMES, ['plugin_outdated']);
+      ok.body.result._meta = { priors_contract: { server_contract: '9.9.9', minimum_plugin: { claude: '9.9.9', codex: '9.9.9' } } };
+      return ok;
+    }
+    if (parsed && parsed.method === 'tools/call') return contextOpenOk(parsed.id, samplePayload());
+    return { status: 404, body: { jsonrpc: '2.0', id: parsed && parsed.id, error: { code: -32601, message: 'unexpected' } } };
+  });
+  try {
+    const dir = mkTmpDir();
+    writeConfig(dir, 'priors.json', { theme: 'GEN' });
+    const stateFile = path.join(dir, 'update-state.json');
+    const { stdout, code } = await runHook({
+      cwd: dir,
+      env: { PRIORS_HOOK_TOKEN_V1: DUMMY_TOKEN, PRIORS_MCP_URL: serverUrl(server), PRIORS_PLUGIN_UPDATE_STATE_FILE: stateFile },
+      stdinObj: { cwd: dir, session_id: 'sess-real', hook_event_name: 'SessionStart' },
+    });
+    assert.equal(code, 0);
+    const out = parseHookOutput(stdout);
+    assert.match(out.systemMessage, /Priorsサーバーはプラグイン 9\.9\.9 以上を要求しています（Claude: \d+\.\d+\.\d+）/);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].name, 'priors-plugin-claude');
+    assert.match(seen[0].version, /^\d+\.\d+\.\d+$/);
+    // 同じ要求版は 1 日 1 回に抑える（状態ファイル経由）
+    const second = await runHook({
+      cwd: dir,
+      env: { PRIORS_HOOK_TOKEN_V1: DUMMY_TOKEN, PRIORS_MCP_URL: serverUrl(server), PRIORS_PLUGIN_UPDATE_STATE_FILE: stateFile },
+      stdinObj: { cwd: dir, session_id: 'sess-real', hook_event_name: 'SessionStart' },
+    });
+    assert.doesNotMatch(parseHookOutput(second.stdout).systemMessage, /以上を要求しています/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('(j2) priors_contract を満たしていれば案内しない', async () => {
+  const server = await startFakeServer((parsed) => {
+    if (parsed && parsed.method === 'initialize') {
+      const ok = initializeOk(parsed.id, SAMPLE_THEMES, []);
+      ok.body.result.priors_contract = { server_contract: '0.1.0', minimum_plugin: { claude: '0.0.1', codex: '0.0.1' } };
+      return ok;
+    }
+    if (parsed && parsed.method === 'tools/call') return contextOpenOk(parsed.id, samplePayload());
+    return { status: 404, body: { jsonrpc: '2.0', id: parsed && parsed.id, error: { code: -32601, message: 'unexpected' } } };
+  });
+  try {
+    const dir = mkTmpDir();
+    writeConfig(dir, 'priors.json', { theme: 'GEN' });
+    const { stdout, code } = await runHook({
+      cwd: dir,
+      env: { PRIORS_HOOK_TOKEN_V1: DUMMY_TOKEN, PRIORS_MCP_URL: serverUrl(server), PRIORS_PLUGIN_UPDATE_STATE_FILE: path.join(dir, 's.json') },
+      stdinObj: { cwd: dir, session_id: 'sess-real', hook_event_name: 'SessionStart' },
+    });
+    assert.equal(code, 0);
+    assert.doesNotMatch(parseHookOutput(stdout).systemMessage, /以上を要求しています/);
+  } finally {
+    await closeServer(server);
+  }
+});

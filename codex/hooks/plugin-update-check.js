@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CLIENT = 'codex';
-const DEFAULT_URL = 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/priors/plugin.json';
+// GEN-541: 公開リポの実パスは codex/plugin.json（旧 codex/priors/plugin.json は 404 で通知が一度も出なかった）
+const DEFAULT_URL = 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/plugin.json';
 const MAX_BODY = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 1500;
 const NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000;

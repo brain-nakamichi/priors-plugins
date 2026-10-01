@@ -77,6 +77,7 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 - モデルの推論やtool結果を人間発言として偽装しない。source typeは実際の出所に合わせる。正式記憶になっても未検証のままである。
 - 自分の記憶の編集・撤回・分割・結合は`maintain`で、直前の版をexpected versionに渡す。候補・受理・却下は無く、直接適用か拒否（forbidden）。Tier B は所有者の Claude / Codex が自律管理する。Tier A は現在、ブラウザの人間による昇格だけが利用でき、エージェントからの自己申告・明示指示の代用は拒否される。別主体の記憶への意見は dispute または amends・refutes・supports のリンクで新しい記憶に追記する。
 - 関係は`relation`のrecordで確定登録する（登録済み≠正しい）。撤回は自分の関係だけ（withdraw）。他の主体の関係への反論は`refs.relation_id`付きの記憶で添える。
+- `annotations`（他の主体が添えた意見）は判断材料。対応・同意・結論の統一は必須でない。撤回済みは `retracted: true` で後ろに並ぶ。必要なら判断を記憶する。
 - `capture`と`maintain`は結果不明のとき同じsession・theme・idempotency keyで再送する（新しい鍵は重複を作る）。
 
 ## 4. 残す判断：`remember`
@@ -88,7 +89,7 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 - `session_id` は自分が呼んだ `context_open` の応答（`resolved_session_id`）から。**書込ツールと `guard`・`checkpoint`・`theme_organize` では必須で、省略すると `invalid_input`（field: session_id）で拒否される。**
 - 書込先が主テーマと違うと `theme_switch_required` で一度止まる。**書込先テーマ（prefix と表示名）を利用者に提示して同意を得てから** `confirm_theme_switch: true` を付けて再送する。モデルの自己判断で「確認済み」としない（ゲートが捕まえたいのはモデル自身の prefix 取り違え）。
 - **再送では `idempotency_key` を変えない**（`confirm_theme_switch` の付け直し、`rate_limited` 後の再試行、通信失敗の再送）。内容を変えるときだけ新しい鍵にする。
-- 試験・練習の書込は本番テーマに混ぜない。評価専用テーマ **ZZPROBE**（サーバー instructions の `themes` には出ないが `namespace` に指定できる）へ書く（`theme_switch_required` は上の手順で扱う）。
+- 試験・練習の書込は本番テーマに混ぜない。評価専用テーマ **ZZPROBE**（`namespace` に直接指定）へ書く。
 
 ## 5. 直す：`amend`
 
@@ -114,6 +115,6 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 | `unauthorized` | token が無効・失効・期限切れ（テーマとは無関係）。**値は読まない・出さない**。管理者に再発行を依頼する |
 | `forbidden` | この credential ではこの tool を呼べない（読取専用、または権限外）。設定は自分で変えず、利用者・管理者に伝える |
 | `theme_switch_required` | 4 節の手順（利用者に書込先を提示 → 同意 → 同じ `idempotency_key` で `confirm_theme_switch: true`。作業メモは hint） |
-| `invalid_input` | 未知の enum 値、allowlist 外の `work_kinds` / `tags`、必須引数の欠落（`checkpoint` / `guard` の `session_id` など）。tool 定義を見て選び直す |
-| `not_found` | ID かテーマの prefix を間違えている可能性。サーバー instructions の `themes` と `id_syntax` で確認 |
-| `rate_limited` | 短時間に呼び過ぎ。`retry_after_seconds` を待ち、同じ `idempotency_key` で 1 回だけ再試行。連打しない |
+| `invalid_input` | 未知の enum 値・allowlist 外の値・必須引数の欠落。tool 定義を見て選び直す。続くなら details の `priors_contract.minimum_plugin` と自身の版を比べ、古ければ更新する |
+| `not_found` | ID かテーマ prefix の誤り。instructions の `themes` と `id_syntax` で確認 |
+| `rate_limited` | `retry_after_seconds` を待ち、同じ `idempotency_key` で 1 回だけ再試行する |

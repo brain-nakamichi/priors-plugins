@@ -34,7 +34,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { checkPluginUpdate } = require('./plugin-update-check');
+const { checkPluginUpdate, checkPluginContract, currentVersion } = require('./plugin-update-check');
 
 const DEFAULT_MCP_URL = 'https://priors-brain9.vercel.app/mcp';
 const DEFAULT_DEADLINE_MS = 7000;
@@ -375,7 +375,8 @@ async function fetchPriorsContext(url, token, theme, workKinds, sessionId, deadl
       {
         protocolVersion: '2025-06-18',
         capabilities: {},
-        clientInfo: { name: 'priors-session-start-hook', version: '0.1.0' },
+        // GEN-542: プラグイン自身の版を名乗る。server はこれを最低版と比べ、古ければ warnings に plugin_outdated
+        clientInfo: { name: 'priors-plugin-claude', version: currentVersion() },
       },
       controller.signal,
     );
@@ -384,6 +385,11 @@ async function fetchPriorsContext(url, token, theme, workKinds, sessionId, deadl
 
     const result = initClass.body.result;
     if (!result || typeof result !== 'object') return { kind: 'malformed' };
+    // GEN-542: プラグイン互換情報は result 直下か _meta のどちらかにある（通常の MCP クライアントが落としても読める）
+    const priorsContract = (result.priors_contract && typeof result.priors_contract === 'object')
+      ? result.priors_contract
+      : (result._meta && typeof result._meta === 'object' && result._meta.priors_contract && typeof result._meta.priors_contract === 'object')
+        ? result._meta.priors_contract : null;
 
     // 15: instructions が JSON でない・文字列でなくても、下見全体は捨てず
     // テーマ照合だけを省いて context_open へ進む
@@ -453,7 +459,7 @@ async function fetchPriorsContext(url, token, theme, workKinds, sessionId, deadl
     }
 
     return {
-      kind: 'ok', themeInfo, payload, initWarnings, instructionsUnavailable,
+      kind: 'ok', themeInfo, payload, initWarnings, instructionsUnavailable, priorsContract,
     };
   } catch (err) {
     if (err && err.name === 'AbortError') return { kind: 'timeout' };
@@ -800,6 +806,9 @@ async function main() {
     sysMsg += '／テーマ一覧が取れず照合を省いた';
   }
   if (startupUpdateNotice) sysMsg += `／${startupUpdateNotice}`;
+  // GEN-542: server が要求する最低版との比較（GitHub 確認が届かなくても server だけで気づける）
+  const contractNotice = checkPluginContract(result.priorsContract, result.initWarnings, process.env);
+  if (contractNotice) sysMsg += `／${contractNotice}`;
 
   writeHookOutput(additionalContext, `Priors: ${sysMsg}`);
 }

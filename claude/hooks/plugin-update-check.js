@@ -79,4 +79,27 @@ async function checkPluginUpdate(env = process.env) {
   finally { clearTimeout(timer); }
 }
 
-module.exports = { checkPluginUpdate, parseVersion, newer };
+/**
+ * GEN-542: server の initialize が返した priors_contract と自身の版を比べ、古ければ案内文を返す。
+ * server が warnings に plugin_outdated を立てたときも同じ案内にする。GitHub 確認と同じ状態ファイルで
+ * 1 日 1 回に抑える（鍵は '<client>-contract'）。失敗は無言（null）。
+ */
+function checkPluginContract(contract, serverWarnings, env = process.env) {
+  try {
+    const current = currentVersion();
+    const minimum = contract && typeof contract === 'object' && contract.minimum_plugin
+      && typeof contract.minimum_plugin === 'object' ? contract.minimum_plugin[CLIENT] : undefined;
+    const flagged = Array.isArray(serverWarnings) && serverWarnings.includes('plugin_outdated');
+    const outdated = flagged || (parseVersion(minimum) !== null && newer(minimum, current));
+    if (!outdated) return null;
+    const required = parseVersion(minimum) !== null ? minimum : 'server が要求する版';
+    const file = statePath(env); const state = readState(file); const now = Date.now();
+    const key = `${CLIENT}-contract`;
+    const previous = state[key];
+    if (previous && previous.version === required && now - Number(previous.notifiedAt) < NOTIFY_INTERVAL_MS) return null;
+    state[key] = { version: required, notifiedAt: now };
+    writeState(file, state);
+    return `Priorsサーバーはプラグイン ${required} 以上を要求しています（Claude: ${current}）。「claude plugin update priors@priors」を実行し、Claude Codeを再起動してください。token・MCP設定は変更しません。`;
+  } catch { return null; }
+}
+module.exports = { checkPluginUpdate, checkPluginContract, currentVersion, parseVersion, newer };

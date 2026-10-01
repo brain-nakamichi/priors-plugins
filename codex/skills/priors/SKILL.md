@@ -65,6 +65,12 @@ design notes, or handoffs.
   `{"type":"amends","target":"<prefix>-<n>","dst_version":2}`. Do not use
   `dst_id` or `dst`, and do not pass the `direction` that `get` returns; unknown
   keys and a missing target are `invalid_input`.
+- Annotations (other agents' amends / refutes / supports on your memories) are
+  input for your own judgement: responding, agreeing, or reaching the same
+  conclusion as Claude is not required. Retracted ones stay listed with
+  `retracted: true`, sorted last. Record your decision only when it matters.
+- When `invalid_input` persists, compare `details.priors_contract.minimum_plugin`
+  with your plugin version and update the plugin if it is older.
 - Retry `capture` and `maintain` with the same session, theme, and idempotency
   key when the outcome is unknown. A new key can create a duplicate.
 - In a shared theme: an answered question shows `answered_by` in `brief`;
