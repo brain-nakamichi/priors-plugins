@@ -76,9 +76,9 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 - 複数の決定・変更・結果を作業に結び付けて残すときは`capture`を使う。保存方針は廃止した。すべて確定で登録し、policy_idは無視される。明示指示の参照は本人が実際に示したものだけを使う。
 - モデルの推論やtool結果を人間発言として偽装しない。source typeは実際の出所に合わせる。正式記憶になっても未検証のままである。
 - 自分の記憶の編集・撤回・分割・結合は`maintain`で、直前の版をexpected versionに渡す。候補・受理・却下は無く、直接適用か拒否（forbidden）。Tier B は所有者の Claude / Codex が自律管理する。Tier A は現在、ブラウザの人間による昇格だけが利用でき、エージェントからの自己申告・明示指示の代用は拒否される。別主体の記憶への意見は dispute または amends・refutes・supports のリンクで新しい記憶に追記する。
-- 関係は`relation`のrecordで確定登録する（登録済み≠正しい）。撤回は自分の関係だけ（withdraw）。他の主体の関係への反論は`refs.relation_id`付きの記憶で添える。
-- `annotations`（他の主体が添えた意見）は判断材料。対応・同意・結論の統一は必須でない。撤回済みは `retracted: true` で後ろに並ぶ。必要なら判断を記憶する。
-- `capture`と`maintain`は結果不明のとき同じsession・theme・idempotency keyで再送する（新しい鍵は重複を作る）。
+- 関係は 2 経路: 記憶を書くときの辺は`links`、独立に登録・撤回する関係は`relation`（登録済み≠正しい、撤回は自分の分だけ）。全体は`get`の`relations`で読む。他の主体の関係への反論は`refs.relation_id`付きの記憶で。
+- `annotations`（他の主体の意見）は判断材料。対応・同意・結論の統一は必須でない。撤回済みは `retracted: true` で後ろ。必要なら判断を記憶する。
+- `capture`／`maintain`は結果不明なら同じsession・theme・idempotency keyで再送する（新しい鍵は重複を作る）。
 
 ## 4. 残す判断：`remember`
 **残す**: 高くついた知見、再発しうる落とし穴、撤回した判断、決めたことと理由。
@@ -100,7 +100,7 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 ## 6. 終える：`checkpoint`
 
 作業の区切り・中断のたびに `checkpoint` を残す（`session_id` 必須）。次回の `context_open` で handoff 枠に出る。`phase` は tool 定義の enum から状況に合うものを選ぶ。
-- `checkpoint` は既定で自分の最新 handoff を置き換える（別作業が並行中なら `supersede_previous: false`）。回答済みの問い（brief の `answered_by`）は `maintain` resolve で閉じる。blocked 解除は次の記録に `status: in_progress`。
+- `checkpoint` は既定で自分の最新 handoff を置き換える（並行作業中は `supersede_previous: false`）。回答済みの問い（`answered_by`）は `maintain` resolve で閉じる。blocked 解除は次の記録に `status: in_progress`。
 
 ## 7. してはいけないこと
 
@@ -116,5 +116,5 @@ MCP接続後にテーマが追加された可能性があるときは、読み�
 | `forbidden` | この credential ではこの tool を呼べない（読取専用、または権限外）。設定は自分で変えず、利用者・管理者に伝える |
 | `theme_switch_required` | 4 節の手順（利用者に書込先を提示 → 同意 → 同じ `idempotency_key` で `confirm_theme_switch: true`。作業メモは hint） |
 | `invalid_input` | 未知の enum 値・allowlist 外の値・必須引数の欠落。tool 定義を見て選び直す。続くなら details の `priors_contract.minimum_plugin` と自身の版を比べ、古ければ更新する |
-| `not_found` | ID かテーマ prefix の誤り。instructions の `themes` と `id_syntax` で確認 |
-| `rate_limited` | `retry_after_seconds` を待ち、同じ `idempotency_key` で 1 回だけ再試行する |
+| `not_found` | ID かテーマ prefix の誤り。`themes` と `id_syntax` で確認 |
+| `rate_limited` | `retry_after_seconds` 待って同じ `idempotency_key` で 1 回だけ再試行 |

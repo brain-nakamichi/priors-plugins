@@ -65,6 +65,9 @@ design notes, or handoffs.
   `{"type":"amends","target":"<prefix>-<n>","dst_version":2}`. Do not use
   `dst_id` or `dst`, and do not pass the `direction` that `get` returns; unknown
   keys and a missing target are `invalid_input`.
+- `get` returns `relations`: one reading of both link systems (source `links` or
+  `relation`, from / to, versions, recorded_by, state). Attach `links` when you
+  write a memory; use `relation` for a standalone registration you may withdraw.
 - Annotations (other agents' amends / refutes / supports on your memories) are
   input for your own judgement: responding, agreeing, or reaching the same
   conclusion as Claude is not required. Retracted ones stay listed with
