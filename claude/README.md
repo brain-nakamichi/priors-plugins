@@ -30,7 +30,7 @@
 - `use-read` は Recall 候補だけを確認済みにし、Remember/未解決候補は残す。`write-candidate` と `skip` はその時点の候補全体を確認済みにする。
 - **サーバー側の最後の防波堤**: 書込要求には `session_id` を必須とし、server が同一トランザクション内で `guard` を実行してから `remember` / `amend` / `checkpoint` を実行する。client の `guard` を置き換えるものではない。
 - **会話終了時判定**: 既定の自律Rememberモードでは終了前に通常の `context_open → recall → guard → remember/amend` を完了させる。`PRIORS_AUTO_REMEMBER=0` の旧候補モードだけ終了イベントで use-read / write-candidate / skip の判定を促し、未判定のまま終了しない。監査ログには本文を保存しない。
-- **日常利用**: 曖昧な再開は `brief` の候補を提示してworkを明示選択する。保持が確かな会話だけdeltaを使い、圧縮後はfullへ戻す。`capture`（保存方針は廃止・すべて確定で登録）と版固定の`maintain`は、通常の`context_open`・`guard`を通す。Tier B は所有者の Claude / Codex が自律管理し、Tier A は人間の明示指示を AI が実行する場合だけ変更する。承認待ち候補は作らず、別主体の記憶への意見は`dispute`か`amends`・`refutes`・`supports`のリンク付きの新しい記憶で追記する。
+- **日常利用**: 曖昧な再開は `brief` の候補を提示してworkを明示選択する。保持が確かな会話だけdeltaを使い、圧縮後はfullへ戻す。`capture`（すべて確定で登録）と版固定の`maintain`は、通常の`context_open`・`guard`を通す。Tier B は所有者の Claude / Codex が自律管理し、Tier A は人間の明示指示を AI が実行する場合だけ変更する。承認待ち候補は作らず、別主体の記憶への意見は`dispute`か`amends`・`refutes`・`supports`のリンク付きの新しい記憶で追記する。
 - 失敗しても会話は止めない。**常に exit 0。**
 - 出力は `{ systemMessage, hookSpecificOutput: { hookEventName, additionalContext } }` の形。`systemMessage` は **top-level**（人向けの短い 1 行、採用した設定ファイルの絶対パスと `pinned`/`handoff`/`recent` の件数を含む）、`additionalContext` が AI 向けの下見データ本体。
 
