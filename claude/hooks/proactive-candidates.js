@@ -232,14 +232,17 @@ function confirmRememberCandidate(candidateId, input = {}, env = process.env) {
     return { ok: false, error: 'invalid_id' };
   }
   const allowed = new Set([
-    'namespace', 'kind', 'memory_type', 'title', 'body', 'idempotency_key',
+    'theme', 'namespace', 'kind', 'memory_type', 'title', 'body', 'idempotency_key',
     'valid_from', 'valid_to', 'tags', 'metrics', 'refs', 'links', 'evidence',
     'rejected_actions', 'session_id', 'guard_receipt_id',
   ]);
   if (Object.keys(input).some((key) => !allowed.has(key))) return { ok: false, error: 'invalid_payload' };
   const kinds = new Set(['goal', 'rule', 'decision', 'experiment', 'finding', 'hypothesis', 'retraction', 'question', 'answer', 'handoff']);
   const memoryTypes = new Set(['episodic', 'semantic', 'procedural', 'profile', 'working']);
-  if (typeof input.namespace !== 'string' || !/^[A-Z][A-Z0-9]{1,7}$/.test(input.namespace)
+  // GEN-563 A: `theme` is the standard name; `namespace` stays as an alias (both must agree when supplied)
+  const themePrefix = input.theme !== undefined ? input.theme : input.namespace;
+  if (typeof themePrefix !== 'string' || !/^[A-Z][A-Z0-9]{1,7}$/.test(themePrefix)
+    || (input.theme !== undefined && input.namespace !== undefined && input.theme !== input.namespace)
     || !kinds.has(input.kind) || !memoryTypes.has(input.memory_type)
     || typeof input.title !== 'string' || input.title.length < 1 || [...input.title].length > 120
     || typeof input.body !== 'string' || input.body.length < 1

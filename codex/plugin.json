@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "priors",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
   "author": {
     "name": "Priors"

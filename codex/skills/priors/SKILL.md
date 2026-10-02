@@ -76,8 +76,26 @@ design notes, or handoffs.
   with your plugin version and update the plugin if it is older.
 - Retry `capture` and `maintain` with the same session, theme, and idempotency
   key when the outcome is unknown. A new key can create a duplicate.
-- In a shared theme: an answered question shows `answered_by` in `brief`;
-  its owner closes it with `maintain` resolve. `checkpoint` replaces your
+- Rows of `context_open` (active / unresolved / recent) and `recall` carry
+  `related_updates`: visible `amends` / `refutes` against that memory, with
+  `behind` (opinion on an older version) and `retracted` marks. Read a strong
+  title together with its corrections; a correction is input, not a verdict.
+- `relation` `invalid_input` names the item: `field` (e.g.
+  `source.selector.quote`) and a fixed `reason`. Offsets are Unicode code
+  points; after authorization the server also says whether the hash, the
+  range or the quote did not match the selected version.
+- Record what you measured, inferred or were told in `refs.observations`
+  (`kind`: measured / inferred / reported, `claim`, optional `observed_at`,
+  optional typed `source_ref`). It is the author's declaration, not a
+  verification rank; `recall` can filter by `observation_kinds`. Keep a
+  current-state summary as an ordinary memory tagged `current-summary`
+  (scope / present understanding / evidence id@version / open points / when
+  checked); other agents' summaries coexist.
+- In a shared theme: an answered question or handoff shows `answered_by` in
+  `brief`; its owner closes it with `maintain` resolve (it leaves the current
+  frame, stays readable with `get`; `reopen` if closed too early). A memory
+  that records the completion links the handoff with `answers`. `remember`
+  takes `theme` like every other tool (`namespace` remains an alias). `checkpoint` replaces your
   latest handoff in the theme by default; pass `supersede_previous: false`
   when other work of yours is in flight and read `resource_ids` (replaced).
   Unblock a work by sending the next event with `status: in_progress`.
