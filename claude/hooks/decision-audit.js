@@ -32,7 +32,10 @@ function normalizeSave(save) {
   if (save === undefined || save === null) return undefined;
   if (typeof save !== 'object') throw new Error('invalid save');
   if (!SAVE_OUTCOMES.has(save.outcome)) throw new Error('invalid save outcome');
-  const ids = Array.isArray(save.ids) ? save.ids.filter((x) => typeof x === 'string' && SAVE_ID.test(x)).slice(0, 20) : [];
+  const ids = Array.isArray(save.ids) ? save.ids : [];
+  if (ids.length > 20 || ids.some((x) => typeof x !== 'string' || !SAVE_ID.test(x))) throw new Error('invalid save id');
+  // GEN-556: "recorded" is only meaningful with the reference the server returned (memory id@version / cache id)
+  if (save.outcome === 'recorded' && ids.length === 0) throw new Error('recorded requires a saved id');
   return { outcome: save.outcome, ids };
 }
 
