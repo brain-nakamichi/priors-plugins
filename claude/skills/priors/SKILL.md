@@ -56,7 +56,7 @@ UserPromptSubmit フックは判定を毎回リマインドし、入力本文は
 - 長期記憶と参照を残した完了メモは `delete`。作業メモの成功を長期記憶の成功と扱わず、失敗しても本来の作業を続ける。
 - 転送は `scripts/asset-transfer.js publish|fetch|resume`。失敗は未完了で記録。
 
-MCP接続後にテーマが追加された可能性があるときは読み取り専用の `theme_list` で最新の可視テーマ一覧を取得する。一覧に無いことだけで不存在と判断しない。
+テーマ追加の可能性があれば `theme_list` で最新一覧を取る（一覧に無いだけで不存在としない）。
 
 ## 記憶整理の自動実行
 利用者がテーマ全体を次世代snapshotへ整理するよう依頼したら、`context_open` → `recall` → `guard` の後に `theme_organize` を呼び、確認で止めず次世代snapshotまで自動実行する。先に `theme_list` を再取得し、その `theme_id` と `current_generation` を使う。`capture` に会話要約・記憶・タスク状態・世代の出所・actor・session・時刻・内容ハッシュを付ける。関係は整理メモに残す（検証済み化・元記憶の削除・自動撤回はしない）。同じ依頼は同じ `idempotency_key` で再送。`theme_id`・世代headが一覧に無ければ推測せず世代初期化が要ると報告。個別記憶の編集・撤回・分割・結合は`maintain`。
@@ -76,8 +76,8 @@ MCP接続後にテーマが追加された可能性があるときは読み取�
 **残す**: 次の会話で役立つもの — 知見、落とし穴、決めたことと理由、継続する要望、未決定の相談・比較案。
 **残さない**: 作業ログ、一時的な状態（`working_cache_write` / `checkpoint` へ）、挨拶や繰り返し。
 
-- **kind の要点は「確かめた事実か、まだ推測か」を分けること**。確かめた事実／決めたこと／守る規則／未解決の問い／未確証の仮説／取り消し、のどれかを見極めてから tool 定義の enum の値を選ぶ（推測を事実の値に格上げしない）。
-- **memory_type の要点は「手順か、事実・関係か、出来事か、作業中の状態か」**。同じく tool 定義の enum から選ぶ。
+- **kind は「確かめた事実か、まだ推測か」を分ける**。事実／決定／規則／未解決の問い／仮説／取り消しを見極めて tool 定義の enum から選ぶ（推測を事実に格上げしない）。
+- **memory_type** は手順／事実・関係／出来事／作業中の状態を見極め、同じく enum から選ぶ。
 - `session_id` は自分が呼んだ `context_open` の応答（`resolved_session_id`）から。**書込ツールと `guard`・`checkpoint`・`theme_organize` では必須**（省略は `invalid_input`）。
 - 書込先が主テーマと違うと `theme_switch_required` で一度止まる。**書込先テーマ（prefix と表示名）を利用者に提示し同意を得てから** `confirm_theme_switch: true` で再送する。自己判断で確認済みとしない。
 - **再送では `idempotency_key` を変えない**（`confirm_theme_switch` の付け直し、`rate_limited` 後、通信失敗）。内容を変えるときだけ新しい鍵にする。
@@ -87,27 +87,28 @@ MCP接続後にテーマが追加された可能性があるときは読み取�
 ## 5. 直す：`amend`
 
 訂正・撤回・pin は `remember` の作り直しではなく `amend`。リンクは `{type, target, note?, dst_version?}` で渡す。`target` は宛先の短ID、`supports` / `refutes` / `amends` は `dst_version` 必須。`get` の `direction` / `from` / `to` は渡さない。
-- 訂正は revise、変化時点が説明できる置き換えは supersede、取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証は dispute。所有者以外の記憶は変更不可（§3.1）。「消して」と言われたら retract を提案する。実データの削除は管理者へ。
+- 訂正は revise、変化時点が説明できる置き換えは supersede、取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証は dispute。所有者以外の記憶は変更不可（§3.1）。「消して」と言われたら retract を提案する。実データの削除は利用者がブラウザの使用容量（`/#/usage`）で行う。
 - **pin**: 常に出したい記憶は Tier A、通常の関連記憶は Tier B。Tier A はブラウザの人間による昇格だけ、Tier B は所有者のエージェントが自律的に設定・変更する。Tier B は `pin_when.tags` か `pin_when.work` の非空条件が必須。作業種別を選ばせる必須フィルタは使わない。
 
 ## 6. 終える：`checkpoint`
 
-作業の区切り・中断のたびに `checkpoint` を残す（`session_id` 必須）。次回の `context_open` で handoff 枠に出る。`phase` は tool 定義の enum から状況に合うものを選ぶ。
+作業の区切り・中断のたびに `checkpoint` を残す（`session_id` 必須）。次回の `context_open` で handoff 枠に出る。`phase` は enum から選ぶ。
 - `checkpoint` は既定で自分の最新 handoff を置き換える（並行作業中は `supersede_previous: false`）。回答済みの問い・引き継ぎ（`answered_by`）は所有者が `maintain` resolve で閉じる（`get` で辿れる・早すぎれば reopen）。完了を記録する記憶は `answers` 辺で元の handoff を指す。blocked 解除は次の記録に `status: in_progress`。
 
 ## 7. してはいけないこと
 
 - token・DB 接続文字列を会話・文書・記憶本文に出さない。環境変数や `.env*` の値を読んで確認する行動もしない。
 - Priors の tool 名を接頭辞つき（`mcp__…`）で記憶や文書に書かず、素の名前（`context_open` 等）にする。
-- SessionStart フックの下見に `resolved_session_id` 相当があるように見えても**書込には使わない**（書込用の `session_id` は必ず自分の `context_open` の応答から）。
+- SessionStart フックの下見の session 値は**書込に使わない**（書込用は自分の `context_open` の応答から）。
 - MCP 登録や利用者の Claude 設定を自分で書き換えない。
 
 ## 8. 困ったとき
 | 応答 | 一行対処 |
 |---|---|
 | `unauthorized` | token が無効・失効・期限切れ。**値は読まない・出さない**。管理者に再発行を依頼 |
-| `forbidden` | この credential ではこの tool を呼べない（読取専用、または権限外）。設定は自分で変えず、利用者・管理者に伝える |
+| `forbidden` | この credential では呼べない（読取専用・権限外）。設定は変えず利用者・管理者に伝える |
 | `theme_switch_required` | 4 節の手順（利用者に書込先を提示 → 同意 → 同じ `idempotency_key` で `confirm_theme_switch: true`。作業メモは hint） |
 | `invalid_input` | 未知の enum・allowlist 外・必須欠落。details の `field`/`reason` と tool 定義を見て直す。続くなら `priors_contract.minimum_plugin` と自身の版を比べ更新 |
 | `not_found` | ID かテーマ prefix の誤り。`themes` と `id_syntax` で確認 |
 | `rate_limited` | `retry_after_seconds` 待って同じ `idempotency_key` で 1 回だけ再試行 |
+| `user_quota_exceeded` / `capacity_owner_unassigned` | 容量上限・責任者未割当。再試行せず、`charged_to: self` なら利用者に `/#/usage` の整理を案内、他はテーマ管理者へ |

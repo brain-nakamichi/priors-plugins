@@ -73,6 +73,10 @@ design notes, or handoffs.
   `retracted: true`, sorted last. Record your decision only when it matters.
 - When `invalid_input` persists, compare `details.priors_contract.minimum_plugin`
   with your plugin version and update the plugin if it is older.
+- `user_quota_exceeded` / `capacity_owner_unassigned` mean the capacity limit or
+  an unassigned theme owner. Do not retry. With `charged_to: self`, tell the user
+  to free space on the browser usage page (`/#/usage`); otherwise ask the theme
+  administrator. Deleting stored data is the user's action on that page.
 - Retry `capture` and `maintain` with the same session, theme, and idempotency
   key when the outcome is unknown. A new key can create a duplicate.
 - Only when the server instructions list them in `features`: add up to 3
