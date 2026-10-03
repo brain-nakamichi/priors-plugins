@@ -203,3 +203,92 @@ test('GEN-579: a publish with a lost answer is resumed with the same operation_i
   });
 });
 
+// --- GEN-584: the replace never loses an edit, whenever it lands; fetch does not settle an unknown publish ---
+const { replaceWithoutLoss } = require(SCRIPT);
+function scratch() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-replace-'));
+  const abs = path.join(dir, 'doc.md'); const tmp = path.join(dir, 'doc.md.tmp');
+  fs.writeFileSync(abs, line('base')); fs.writeFileSync(tmp, line('remote'));
+  return { dir, abs, tmp, before: fs.readFileSync(abs), done: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+const leftovers = (dir) => fs.readdirSync(dir).filter((f) => f.includes('priors-replacing'));
+
+test('GEN-584 replace: no edit → the remote version is placed and nothing is left behind', async () => {
+  const s = scratch();
+  try {
+    const r = await replaceWithoutLoss(s.abs, s.tmp, s.before);
+    assert.deepEqual(r, { placed: true, preserved: null });
+    assert.equal(fs.readFileSync(s.abs, 'utf8'), line('remote'));
+    assert.deepEqual(leftovers(s.dir), []);
+  } finally { s.done(); }
+});
+
+test('GEN-584 replace: an edit saved just before the replace (the review probe) stays at the path', async () => {
+  const s = scratch();
+  try {
+    fs.writeFileSync(s.abs, line('edited at the last moment')); // after the caller's last look, before the replace
+    const r = await replaceWithoutLoss(s.abs, s.tmp, s.before);
+    assert.equal(r.placed, false);
+    assert.equal(fs.readFileSync(s.abs, 'utf8'), line('edited at the last moment'));
+    assert.deepEqual(leftovers(s.dir), []);
+  } finally { s.done(); }
+});
+
+test('GEN-584 replace: an editor re-creating the file while it is set aside wins; nothing is overwritten', async () => {
+  const s = scratch();
+  try {
+    const r = await replaceWithoutLoss(s.abs, s.tmp, s.before, {
+      beforeCreate: async () => { fs.writeFileSync(s.abs, line('saved by the editor')); } });
+    assert.equal(r.placed, false);
+    assert.equal(fs.readFileSync(s.abs, 'utf8'), line('saved by the editor'));
+    assert.deepEqual(leftovers(s.dir), []);
+  } finally { s.done(); }
+});
+
+test('GEN-584 replace: an edit written into the moved file (same open file) is kept under another name', async () => {
+  const s = scratch();
+  try {
+    const r = await replaceWithoutLoss(s.abs, s.tmp, s.before, {
+      beforeCreate: async (aside) => { fs.writeFileSync(aside, line('written through the old handle')); } });
+    assert.equal(r.placed, true);
+    assert.equal(fs.readFileSync(s.abs, 'utf8'), line('remote'));
+    assert.equal(fs.readFileSync(r.preserved, 'utf8'), line('written through the old handle'));
+    assert.match(path.basename(r.preserved), /^doc\.md\.priors-local\.md$/);
+    assert.deepEqual(leftovers(s.dir), []);
+  } finally { s.done(); }
+});
+
+test('GEN-584 replace: an edit between the move and its check is put back; a missing file is created only if still absent', async () => {
+  const s = scratch();
+  try {
+    const r = await replaceWithoutLoss(s.abs, s.tmp, s.before, {
+      afterAside: async (aside) => { fs.writeFileSync(aside, line('edit raced the move')); } });
+    assert.equal(r.placed, false);
+    assert.equal(fs.readFileSync(s.abs, 'utf8'), line('edit raced the move'));
+    fs.rmSync(s.abs);
+    fs.writeFileSync(s.abs, line('created meanwhile'));
+    const r2 = await replaceWithoutLoss(s.abs, s.tmp, null);
+    assert.equal(r2.placed, false);
+    assert.equal(fs.readFileSync(s.abs, 'utf8'), line('created meanwhile'));
+  } finally { s.done(); }
+});
+
+test('GEN-584: fetch is refused while a publish result is unknown; the saved request stays', async () => {
+  await withFake(async ({ ctl, dir, env }) => {
+    const file = path.join(dir, 'c.md');
+    fs.writeFileSync(file, line('# first'));
+    ctl.dropWrites = 3; ctl.applied = true;
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'c.md'], env);
+    assert.equal(r.err.error, 'result_unknown');
+    const op = r.err.operation_id;
+    r = await run(['fetch', file, '--theme', 'GEN', '--key', 'c.md'], env);
+    assert.equal(r.code, 1); assert.equal(r.err.error, 'publish_result_unknown'); assert.equal(r.err.operation_id, op);
+    r = await run(['status', file], env); assert.equal(r.out.state, 'publish_result_unknown');
+    assert.equal(fs.readdirSync(path.join(dir, 'state', 'document-sync-pending')).length, 1);
+    // publish settles it with the same request
+    ctl.applied = false;
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.resumed.operation_id, op);
+  });
+});
+

@@ -261,10 +261,62 @@ async function keepBoth(abs, bytes, version) {
   fail('no_free_name');
 }
 
+/** Create `dest` from `src` only if `dest` does not exist (a hard link is atomic and exclusive; copy as a fallback). */
+async function createExclusive(src, dest) {
+  try { await fsp.link(src, dest); return true; } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    if (!['EPERM', 'ENOTSUP', 'EXDEV', 'EOPNOTSUPP', 'EINVAL'].includes(e.code)) throw e;
+  }
+  try { await fsp.copyFile(src, dest, fs.constants.COPYFILE_EXCL); return true; } catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+}
+
+/** Keep a local file under a new name next to `abs` (never over another file). Returns that name. */
+async function preserveLocal(abs, from) {
+  const ext = path.extname(abs) || '.md';
+  for (let n = 1; n < 1000; n++) {
+    const candidate = `${abs}.priors-local${n === 1 ? '' : `-${n}`}${ext}`;
+    if (await createExclusive(from, candidate)) { await fsp.rm(from, { force: true }); return candidate; }
+  }
+  fail('no_free_name');
+}
+
+/**
+ * Replace `abs` (whose content was `before`, or absent) with the verified `tmp`, without ever losing a local edit
+ * (GEN-584). Editors do not take our lock, so a plain read-then-rename always leaves a window. Instead:
+ *  1. move the current file aside (atomic; on Windows an editor that holds the file open makes this fail → no replace);
+ *  2. if what was moved is not `before`, an edit landed first: put it back (or keep it under a new name) → no replace;
+ *  3. create `abs` from `tmp` exclusively (if an editor re-created `abs` meanwhile, nothing is overwritten → no replace);
+ *  4. look at the moved file once more: unchanged → remove it; written to after step 2 → keep it under a new name.
+ * Every interleaving ends with the user's latest text either at `abs` or in a kept file. The trade-off: a replace is
+ * refused more often (any concurrent access counts as an edit), and then the remote version is saved next to it.
+ */
+async function replaceWithoutLoss(abs, tmp, before, hooks = {}) {
+  if (before === null) return { placed: await createExclusive(tmp, abs), preserved: null };
+  const aside = `${abs}.priors-replacing-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try { await fsp.rename(abs, aside); } catch { return { placed: false, preserved: null }; }
+  if (hooks.afterAside) await hooks.afterAside(aside);
+  const moved = await readLocal(aside);
+  if (moved === null || !moved.equals(before)) {
+    if (moved !== null && await createExclusive(aside, abs)) { await fsp.rm(aside, { force: true }); return { placed: false, preserved: null }; }
+    return { placed: false, preserved: moved === null ? null : await preserveLocal(abs, aside) };
+  }
+  if (hooks.beforeCreate) await hooks.beforeCreate(aside);
+  const placed = await createExclusive(tmp, abs);
+  const after = await readLocal(aside);
+  if (after !== null && after.equals(before)) { await fsp.rm(aside, { force: true }); return { placed, preserved: null }; }
+  return { placed, preserved: after === null ? null : await preserveLocal(abs, aside) };
+}
+
 async function fetchDoc(p, opts) {
   const abs = safePath(p);
   return withPathLock(abs, async () => {
     const row = await withLedger(async (s) => s[abs]);
+    // an earlier publish whose result is unknown must be settled first: a fetched copy with the same hash is not proof
+    // that the request succeeded, and replacing the ledger row would drop the saved request (GEN-584)
+    if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing')) {
+      fail('publish_result_unknown', { operation_id: row.pending.operation_id,
+        note: 'run publish first; it asks the server with the same request and settles it' });
+    }
     const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
     const target = opts.id ? { document_id: opts.id } : opts.key ? { document_key: opts.key } : row?.document_id ? { document_id: row.document_id } : fail('document_required');
     const meta = await remoteVersionMeta(theme, target.document_id || (await remoteHead(theme, target)).document_id, opts.version || null);
@@ -273,24 +325,32 @@ async function fetchDoc(p, opts) {
     const baseSha = row?.base_sha256;
     const differs = (local) => local !== null && (baseSha ? sha256(local) !== baseSha : sha256(local) !== got.sha256);
     let conflict = differs(before);
+    let preserved = null;
     if (!conflict) {
       await fsp.mkdir(path.dirname(abs), { recursive: true });
       const tmp = `${abs}.tmp-${process.pid}`;
       await fsp.writeFile(tmp, got.bytes, { mode: 0o600 });
       if (sha256(await fsp.readFile(tmp)) !== got.sha256) { await fsp.rm(tmp, { force: true }); fail('document_hash_mismatch'); }
-      // look again right before replacing: an edit made while downloading is kept, never overwritten (§8)
-      const now = await readLocal(abs);
-      const unchanged = (now === null && before === null) || (now !== null && before !== null && now.equals(before));
-      if (unchanged) await fsp.rename(tmp, abs);
-      else { await fsp.rm(tmp, { force: true }); conflict = true; }
+      // an edit made while downloading, or at any moment of the replace, is kept, never overwritten (§8, GEN-584)
+      try {
+        const r = await replaceWithoutLoss(abs, tmp, before);
+        preserved = r.preserved;
+        if (!r.placed) conflict = true;
+      } finally { await fsp.rm(tmp, { force: true }); }
     }
     if (conflict) {
       const saved = await keepBoth(abs, got.bytes, got.version);
       return { path: saved, state: 'conflict', document_id: meta.document_id, version: got.version, sha256: got.sha256, local_kept: abs,
+        ...(preserved ? { local_edit_kept_at: preserved } : {}),
         note: 'the local file differs from the last synced base (or changed during the fetch); the remote version was saved next to it' };
     }
     await withLedger(async (s) => { s[abs] = { theme, document_id: meta.document_id, document_key: meta.document_key, base_version: got.version,
       base_sha256: got.sha256, local_sha256: got.sha256, remote_head: meta.head_version, synced_at: new Date().toISOString(), stage: 'synced' }; });
+    if (preserved) {
+      // the remote version is now at the path; an edit written during the very last step was kept under another name
+      return { path: abs, state: 'conflict', document_id: meta.document_id, version: got.version, sha256: got.sha256,
+        local_kept: preserved, note: 'an edit arrived while the file was being replaced; it was kept under local_kept' };
+    }
     return { path: abs, state: 'up_to_date', document_id: meta.document_id, version: got.version, sha256: got.sha256 };
   });
 }
@@ -312,7 +372,7 @@ async function main(argv) {
   if (cmd === 'fetch') return fetchDoc(file, o);
   fail('usage');
 }
-module.exports = { classify, safePath, sha256 };
+module.exports = { classify, safePath, sha256, replaceWithoutLoss };
 if (require.main === module) {
   main(process.argv.slice(2)).then((v) => process.stdout.write(JSON.stringify(v) + '\n'))
     .catch((e) => { process.stderr.write(JSON.stringify({ error: e.code || 'document_sync_failed', ...(e.extra || {}) }) + '\n'); process.exitCode = 1; });
