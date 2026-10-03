@@ -15,6 +15,9 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 function fakePriors() {
   const docs = new Map(); // id -> { key, versions: [{bytes, sha}] }
   const receipts = new Map();
+  // test controls: drop the answer of the next N writes (applied=true: the write happens, only the reply is lost);
+  // onDownload runs while a GET of the content is being served
+  const ctl = { dropWrites: 0, applied: false, onDownload: null, writes: 0 };
   const write = (args, bytes) => {
     if (receipts.has(args.operation_id)) return { ...receipts.get(args.operation_id), replayed: true };
     let id = args.document_id;
@@ -45,6 +48,11 @@ function fakePriors() {
           const v = a.version || d.versions.length; out = { document_id: id, document_key: d.key, title: d.title, state: 'active', version: v, head_version: d.versions.length, sha256: d.versions[v - 1].sha };
         }
       } else if (a.action === 'write') {
+        ctl.writes++;
+        if (ctl.dropWrites > 0) {
+          ctl.dropWrites--; if (ctl.applied) write(a, Buffer.from(a.source_base64, 'base64'));
+          return send(503, { error: 'unavailable' });
+        }
         out = write(a, Buffer.from(a.source_base64, 'base64')); isError = !!out.error;
       }
       return send(200, { jsonrpc: '2.0', id: rpc.id, result: { content: [{ type: 'text', text: JSON.stringify(out) }], ...(isError ? { isError: true } : {}) } });
@@ -52,6 +60,7 @@ function fakePriors() {
     const m = /^\/documents\/([^/]+)\/content$/.exec(url.pathname);
     if (req.method === 'GET' && m) {
       const d = docs.get(m[1]); const v = Number(url.searchParams.get('version')) || d.versions.length; const ver = d.versions[v - 1];
+      if (ctl.onDownload) { const f = ctl.onDownload; ctl.onDownload = null; f(); }
       return send(200, ver.bytes, { 'content-type': 'text/markdown', 'x-priors-sha256': ver.sha, 'x-priors-version': String(v) });
     }
     if ((req.method === 'PUT' && m) || (req.method === 'POST' && url.pathname === '/documents/content')) {
@@ -62,7 +71,7 @@ function fakePriors() {
     }
     send(404, { error: 'not_found' });
   });
-  return { server, docs };
+  return { server, docs, receipts, ctl };
 }
 
 function run(args, env) {
@@ -128,3 +137,69 @@ test('publish → status → remote change → fetch, and a conflict keeps both 
     server.close(); fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+async function withFake(fn) {
+  const fake = fakePriors();
+  await new Promise((r) => fake.server.listen(0, '127.0.0.1', r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-docsync-'));
+  const env = { PRIORS_MCP_URL: `http://127.0.0.1:${fake.server.address().port}/mcp`, PRIORS_DOCUMENT_TOKEN: 'test-token',
+    PRIORS_DOCUMENT_SYNC_STATE: path.join(dir, 'state', 'ledger.json'), PRIORS_DOCUMENT_ROOT: dir };
+  try { await fn({ ...fake, dir, env }); } finally { fake.server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+}
+const line = (s) => `${s}\n`;
+
+test('GEN-579: an edit made while fetch downloads is kept; the remote goes to a new name, never over another file', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'a.md');
+    fs.writeFileSync(file, line('# v1'));
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'a.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const v2 = Buffer.from(line('# v2')); d.versions.push({ bytes: v2, sha: sha(v2) });
+    // an unrelated file already sits at the first keep-both name: it must survive
+    fs.writeFileSync(`${file}.priors-v2.md`, line('someone else'));
+    ctl.onDownload = () => fs.writeFileSync(file, line('# edited during download'));
+    r = await run(['fetch', file, '--theme', 'GEN'], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err));
+    assert.equal(r.out.state, 'conflict');
+    assert.equal(fs.readFileSync(file, 'utf8'), line('# edited during download'));
+    assert.equal(fs.readFileSync(`${file}.priors-v2.md`, 'utf8'), line('someone else'));
+    assert.equal(r.out.path, `${file}.priors-v2-2.md`);
+    assert.deepEqual(fs.readFileSync(r.out.path), v2);
+    // the ledger did not move: the local edit is still measured against v1
+    r = await run(['status', file], env); assert.equal(r.out.state, 'conflict');
+  });
+});
+
+test('GEN-579: a publish with a lost answer is resumed with the same operation_id and bytes (create and update)', async () => {
+  await withFake(async ({ docs, receipts, ctl, dir, env }) => {
+    const file = path.join(dir, 'b.md');
+    fs.writeFileSync(file, line('# first'));
+    // the create reaches the server but every answer is lost
+    ctl.dropWrites = 3; ctl.applied = true;
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'b.md'], env);
+    assert.equal(r.code, 1); assert.equal(r.err.error, 'result_unknown');
+    const op = r.err.operation_id;
+    r = await run(['status', file], env); assert.equal(r.out.state, 'publish_result_unknown'); assert.equal(r.out.operation_id, op);
+    // the local file changes meanwhile; the resume still sends the original bytes, then publishes the edit as v2
+    fs.writeFileSync(file, line('# second'));
+    ctl.applied = false;
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err));
+    assert.equal(r.out.resumed.operation_id, op); assert.equal(r.out.resumed.replayed, true); assert.equal(r.out.resumed.version, 1);
+    assert.equal(r.out.version, 2);
+    const d = docs.get(r.out.document_id);
+    assert.deepEqual(d.versions.map((v) => v.bytes.toString()), [line('# first'), line('# second')], 'no duplicate document or version');
+    assert.equal(docs.size, 1); assert.ok(receipts.has(op));
+
+    // an update whose request never reached the server is applied once on resume
+    fs.writeFileSync(file, line('# third'));
+    ctl.dropWrites = 3; ctl.applied = false;
+    r = await run(['publish', file], env); assert.equal(r.err.error, 'result_unknown');
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.resumed.replayed, false); assert.equal(r.out.version, 3);
+    assert.equal(r.out.published, true);
+    assert.equal(d.versions.length, 3);
+    // the saved request is removed once answered
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'state', 'document-sync-pending')), []);
+  });
+});
+

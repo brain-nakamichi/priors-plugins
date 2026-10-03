@@ -87,7 +87,11 @@ design notes, or handoffs.
   with `expected_version` and `expected_sha256`) / `history` / `diff` /
   `export` / `archive`. Only the creating agent writes a document; others make
   their own key and refer to it in a memory. The head is the latest version,
-  not the correct opinion. Sync a local file with
+  not the correct opinion. Find documents with `search` (names, headings and
+  text of the latest versions; it returns sections, never the body). Point a
+  memory at a fixed version with `refs.documents` ({document_id, version,
+  sha256, section_id?}); `recall` / `consult` may list `related_documents`
+  as hints to read, not as the text. Sync a local file with
   `scripts/document-sync.js status|publish|fetch` (a conflict keeps both).
 - Rows of `context_open` (active / unresolved / recent) and `recall` carry
   `related_updates`: visible `amends` / `refutes` against that memory, with

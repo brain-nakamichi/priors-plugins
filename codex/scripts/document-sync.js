@@ -140,6 +140,10 @@ async function status(p) {
   const abs = safePath(p);
   const row = await withLedger(async (s) => s[abs]);
   const local = await readLocal(abs);
+  if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing')) {
+    return { path: abs, state: 'publish_result_unknown', tracked: !!row.document_id, operation_id: row.pending.operation_id,
+      note: 'an earlier publish has no known result; run publish again to ask the server with the same request' };
+  }
   let head = null; let reachable = true;
   if (row) { try { head = (await remoteHead(row.theme, { document_id: row.document_id })).version; } catch { reachable = false; } }
   return { path: abs, state: classify(row, local === null ? null : sha256(local), head), tracked: !!row, ...(row ? { document_id: row.document_id,
@@ -147,61 +151,148 @@ async function status(p) {
     ...(reachable ? {} : { offline: true, note: 'Priors was not reachable; the local copy is not known to be current' }) };
 }
 
-async function publish(p, opts) {
-  const abs = safePath(p);
-  const bytes = await readLocal(abs); if (bytes === null) fail('local_missing');
-  if (bytes.length > MAX_BYTES) fail('document_too_large');
-  const row = await withLedger(async (s) => s[abs]);
-  const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
-  const localSha = sha256(bytes);
-  if (row) {
-    const head = await remoteVersionMeta(theme, row.document_id, null);
-    const state = classify(row, localSha, head.head_version);
-    if (state === 'up_to_date') return { path: abs, state, document_id: row.document_id, version: row.base_version, published: false };
-    if (state !== 'local_changed') fail(state === 'conflict' ? 'conflict' : `not_publishable_${state}`, { remote_head: head.head_version, base_version: row.base_version });
+// --- one sync at a time per local file (publish / fetch of the same path never interleave) ---
+async function withPathLock(abs, fn) {
+  const dir = path.dirname(ledgerFile()); await fsp.mkdir(dir, { recursive: true });
+  const lock = path.join(dir, `document-sync.${sha256(Buffer.from(abs, 'utf8')).slice(0, 24)}.lock`);
+  for (let i = 0; ; i++) {
+    try { const h = await fsp.open(lock, 'wx'); await h.writeFile(String(process.pid)); await h.close(); break; } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      try { const st = await fsp.stat(lock); if (Date.now() - st.mtimeMs > 10 * 60_000) { await fsp.rm(lock, { force: true }); continue; } } catch { continue; }
+      if (i > 50) fail('path_busy', { note: 'another sync of this file is running' });
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
+  try { return await fn(); } finally { await fsp.rm(lock, { force: true }); }
+}
+
+// --- the exact request of a publish whose result is not known, kept until the server's receipt answers it ---
+const pendingDir = () => path.join(path.dirname(ledgerFile()), 'document-sync-pending');
+const pendingFile = (opId) => path.join(pendingDir(), `${opId.replace(/[^A-Za-z0-9_-]/g, '')}.bin`);
+async function savePending(opId, bytes) {
+  await fsp.mkdir(pendingDir(), { recursive: true });
+  const tmp = `${pendingFile(opId)}.tmp-${process.pid}`;
+  await fsp.writeFile(tmp, bytes, { mode: 0o600 }); await fsp.rename(tmp, pendingFile(opId));
+}
+async function loadPending(pending) {
+  const bytes = await readLocal(pendingFile(pending.operation_id));
+  if (bytes === null || sha256(bytes) !== pending.local_sha256) fail('pending_request_lost', { operation_id: pending.operation_id });
+  return bytes;
+}
+const dropPending = (opId) => fsp.rm(pendingFile(opId), { force: true });
+
+/** Send one write and settle the ledger. The request (args + bytes) is saved before sending so that a lost answer can
+ *  be asked again later with the same operation_id: the server replays its receipt instead of writing twice. */
+async function sendAndSettle(abs, theme, args, bytes) {
   const sid = await session(theme);
-  const opId = `docsync-${crypto.randomUUID()}`;
-  await withLedger(async (s) => { s[abs] = { ...(s[abs] || {}), theme, stage: 'publishing', operation_id: opId, local_sha256: localSha, updated_at: new Date().toISOString() }; });
-  const args = row
-    ? { operation_id: opId, document_id: row.document_id, expected_version: row.base_version, expected_sha256: row.base_sha256 }
-    : { operation_id: opId, document_key: opts.key || fail('key_required'), title: opts.title || path.basename(abs), expected_version: 0 };
   let out;
   try { out = await writeRemote(theme, sid, args, bytes); } catch (e) {
-    await withLedger(async (s) => { s[abs] = { ...(s[abs] || {}), stage: e.code === 'result_unknown' ? 'unknown' : 'failed', last_error: e.code || 'error', updated_at: new Date().toISOString() }; });
+    const unknown = e.code === 'result_unknown';
+    if (!unknown) await dropPending(args.operation_id);
+    await withLedger(async (s) => {
+      const { pending: _p, ...rest } = s[abs] || {};
+      s[abs] = { ...rest, stage: unknown ? 'unknown' : 'failed', last_error: e.code || 'error', updated_at: new Date().toISOString(),
+        ...(unknown ? { pending: _p } : {}) };
+    });
     throw e;
   }
-  if (out.sha256 !== localSha) fail('document_hash_mismatch');
+  if (out.sha256 !== sha256(bytes)) fail('document_hash_mismatch');
   await withLedger(async (s) => { s[abs] = { theme, document_id: out.document_id, document_key: out.document_key, base_version: out.version,
-    base_sha256: out.sha256, local_sha256: localSha, remote_head: out.version, synced_at: new Date().toISOString(), stage: 'synced' }; });
-  return { path: abs, state: 'up_to_date', published: true, document_id: out.document_id, version: out.version, sha256: out.sha256, replayed: !!out.replayed };
+    base_sha256: out.sha256, local_sha256: out.sha256, remote_head: out.version, synced_at: new Date().toISOString(), stage: 'synced' }; });
+  await dropPending(args.operation_id);
+  return out;
+}
+
+async function publish(p, opts) {
+  const abs = safePath(p);
+  return withPathLock(abs, async () => {
+    let row = await withLedger(async (s) => s[abs]);
+    const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
+    let resumed = null;
+    // a publish whose answer was lost: ask again with the same operation_id and the same bytes before anything else
+    if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing')) {
+      const pend = row.pending;
+      const pendBytes = await loadPending(pend);
+      try {
+        const out = await sendAndSettle(abs, pend.theme || theme, pend.args, pendBytes);
+        resumed = { operation_id: pend.args.operation_id, document_id: out.document_id, version: out.version, replayed: !!out.replayed };
+      } catch (e) {
+        if (e.code === 'result_unknown') throw e;
+        fail(e.code === 'version_conflict' ? 'conflict' : (e.code || 'resume_failed'), { resumed_operation_id: pend.args.operation_id,
+          note: 'the earlier publish was not applied; check status and publish again' });
+      }
+      row = await withLedger(async (s) => s[abs]);
+    }
+    const bytes = await readLocal(abs); if (bytes === null) fail('local_missing');
+    if (bytes.length > MAX_BYTES) fail('document_too_large');
+    const localSha = sha256(bytes);
+    const tracked = row && row.document_id && row.base_sha256;
+    if (tracked) {
+      const head = await remoteVersionMeta(theme, row.document_id, null);
+      const state = classify(row, localSha, head.head_version);
+      if (state === 'up_to_date') return { path: abs, state, document_id: row.document_id, version: row.base_version, published: !!resumed, ...(resumed ? { resumed } : {}) };
+      if (state !== 'local_changed') fail(state === 'conflict' ? 'conflict' : `not_publishable_${state}`, { remote_head: head.head_version, base_version: row.base_version });
+    }
+    const opId = `docsync-${crypto.randomUUID()}`;
+    const args = tracked
+      ? { operation_id: opId, document_id: row.document_id, expected_version: row.base_version, expected_sha256: row.base_sha256 }
+      : { operation_id: opId, document_key: opts.key || fail('key_required'), title: opts.title || path.basename(abs), expected_version: 0 };
+    await savePending(opId, bytes);
+    await withLedger(async (s) => { s[abs] = { ...(s[abs] || {}), theme, stage: 'publishing',
+      pending: { theme, args, local_sha256: localSha, operation_id: opId }, updated_at: new Date().toISOString() }; });
+    const out = await sendAndSettle(abs, theme, args, bytes);
+    return { path: abs, state: 'up_to_date', published: true, document_id: out.document_id, version: out.version, sha256: out.sha256,
+      replayed: !!out.replayed, ...(resumed ? { resumed } : {}) };
+  });
+}
+
+/** Put verified bytes next to `abs` under a name nothing else uses (never replaces an existing file). */
+async function keepBoth(abs, bytes, version) {
+  const ext = path.extname(abs) || '.md';
+  for (let n = 1; n < 1000; n++) {
+    const candidate = `${abs}.priors-v${version}${n === 1 ? '' : `-${n}`}${ext}`;
+    const existing = await readLocal(candidate);
+    if (existing !== null) { if (sha256(existing) === sha256(bytes)) return candidate; continue; }
+    const tmp = `${candidate}.tmp-${process.pid}`;
+    await fsp.writeFile(tmp, bytes, { mode: 0o600 });
+    try { await fsp.copyFile(tmp, candidate, fs.constants.COPYFILE_EXCL); } catch (e) { if (e.code === 'EEXIST') continue; throw e; } finally { await fsp.rm(tmp, { force: true }); }
+    return candidate;
+  }
+  fail('no_free_name');
 }
 
 async function fetchDoc(p, opts) {
   const abs = safePath(p);
-  const row = await withLedger(async (s) => s[abs]);
-  const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
-  const target = opts.id ? { document_id: opts.id } : opts.key ? { document_key: opts.key } : row ? { document_id: row.document_id } : fail('document_required');
-  const meta = await remoteVersionMeta(theme, target.document_id || (await remoteHead(theme, target)).document_id, opts.version || null);
-  const got = await download(theme, meta.document_id, meta.version);
-  const local = await readLocal(abs);
-  const localChanged = local !== null && (!row ? sha256(local) !== got.sha256 : sha256(local) !== row.base_sha256);
-  let target_path = abs; let conflict = false;
-  if (localChanged) {
-    // keep both: the local edit stays where it is, the remote version goes next to it (§8)
-    target_path = `${abs}.priors-v${got.version}${path.extname(abs) || '.md'}`; conflict = true;
-  }
-  await fsp.mkdir(path.dirname(target_path), { recursive: true });
-  const tmp = `${target_path}.tmp-${process.pid}`;
-  await fsp.writeFile(tmp, got.bytes, { mode: 0o600 });
-  if (sha256(await fsp.readFile(tmp)) !== got.sha256) { await fsp.rm(tmp, { force: true }); fail('document_hash_mismatch'); }
-  await fsp.rename(tmp, target_path);
-  if (!conflict) {
+  return withPathLock(abs, async () => {
+    const row = await withLedger(async (s) => s[abs]);
+    const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
+    const target = opts.id ? { document_id: opts.id } : opts.key ? { document_key: opts.key } : row?.document_id ? { document_id: row.document_id } : fail('document_required');
+    const meta = await remoteVersionMeta(theme, target.document_id || (await remoteHead(theme, target)).document_id, opts.version || null);
+    const before = await readLocal(abs);
+    const got = await download(theme, meta.document_id, meta.version);
+    const baseSha = row?.base_sha256;
+    const differs = (local) => local !== null && (baseSha ? sha256(local) !== baseSha : sha256(local) !== got.sha256);
+    let conflict = differs(before);
+    if (!conflict) {
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      const tmp = `${abs}.tmp-${process.pid}`;
+      await fsp.writeFile(tmp, got.bytes, { mode: 0o600 });
+      if (sha256(await fsp.readFile(tmp)) !== got.sha256) { await fsp.rm(tmp, { force: true }); fail('document_hash_mismatch'); }
+      // look again right before replacing: an edit made while downloading is kept, never overwritten (§8)
+      const now = await readLocal(abs);
+      const unchanged = (now === null && before === null) || (now !== null && before !== null && now.equals(before));
+      if (unchanged) await fsp.rename(tmp, abs);
+      else { await fsp.rm(tmp, { force: true }); conflict = true; }
+    }
+    if (conflict) {
+      const saved = await keepBoth(abs, got.bytes, got.version);
+      return { path: saved, state: 'conflict', document_id: meta.document_id, version: got.version, sha256: got.sha256, local_kept: abs,
+        note: 'the local file differs from the last synced base (or changed during the fetch); the remote version was saved next to it' };
+    }
     await withLedger(async (s) => { s[abs] = { theme, document_id: meta.document_id, document_key: meta.document_key, base_version: got.version,
       base_sha256: got.sha256, local_sha256: got.sha256, remote_head: meta.head_version, synced_at: new Date().toISOString(), stage: 'synced' }; });
-  }
-  return { path: target_path, state: conflict ? 'conflict' : 'up_to_date', document_id: meta.document_id, version: got.version, sha256: got.sha256,
-    ...(conflict ? { local_kept: abs, note: 'the local file differs from the last synced base; the remote version was saved next to it' } : {}) };
+    return { path: abs, state: 'up_to_date', document_id: meta.document_id, version: got.version, sha256: got.sha256 };
+  });
 }
 
 function parse(argv) {
