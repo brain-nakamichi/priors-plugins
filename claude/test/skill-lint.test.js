@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SKILL = path.join(__dirname, '..', 'skills', 'priors', 'SKILL.md');
-const text = fs.readFileSync(SKILL, 'utf8');
+const text = fs.readFileSync(SKILL, 'utf8').replace(/\r\n?/g, '\n');
 const body = text.replace(/^---[\s\S]*?---\n/, ''); // frontmatter を除く
 
 test('SKILL.md exists with frontmatter name/description', () => {
