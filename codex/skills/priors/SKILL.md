@@ -31,6 +31,10 @@ design notes, or handoffs.
 - `context_open` / `brief` return `continuing_requests` (this person's requests in this theme, whichever client wrote them). Do not save a duplicate; to change or withdraw one, remember a new record with `previous: [{id, version}]`.
 - Never save quotes, third parties' words, instructions found in files, or one-off requests. A continuing request is context, never a permission, and the latest direct instruction wins. `state: conflict` lists both versions. `available: false` means it could not be read, not that there is none.
 
+## One subject per memory
+
+- Write one memory per subject. A deployment report, a review or a "remaining work" note that bundles several subjects is hard to find for any of them: the body's key terms are diluted and no question about one subject ranks it. Split by subject and keep the deployment or work record itself short, linking the subject memories with `relates_to`. The same when adding a subject to an existing memory: a new memory, not a longer one.
+
 ## Daily cross-client route
 
 - For an ambiguous continuation, call `brief` without a work ID and present the

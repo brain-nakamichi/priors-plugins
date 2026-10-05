@@ -68,6 +68,7 @@ try {
           : 'Priors終了時判定（必須）: この会話で残すべき確定事項があるか判断する。',
         'use-read / write-candidate / skip のいずれかを選び、record-decision.js --phase conversation-end でローカル監査ログへ記録する。保存したときは成功応答の ID・版を確認してから --save-result recorded --saved <id@version,...> を添える。失敗は --save-result failed として残し本来の回答は続ける。保存不要なら --save-result not_needed。「保存する」と記録しただけでは完了にしない。',
         'write-candidate の場合は、下記の候補別手順だけを確認し、該当しない操作を連鎖させない。',
+        '記憶は 1 主題 1 件で書く（GEN-711）: 配備報告・レビュー・残件対応のように複数の主題を 1 件にまとめると、どの主題の質問でも本文の要点が薄まり検索で見つからない（例: GEN-629 / GEN-661 型）。主題ごとに記憶を分け、配備や作業の記録は短い 1 件にして relates_to で束ねる。既にある記憶へ主題を足すときも同じ。',
         '継続要望（GEN-670）: 本人がこのテーマで次からも続けてほしいと言った要望（回答の言語・長さ・形式など）があったターンは、remember の refs.continuing_request で保存したか（ID・版）、保存に失敗したか（failed）を記録する。skip だけではその保存を済ませたことにしない。既に同じ要望がある・引用や今回限りの依頼なら保存しない。',
         candidateSummary.total > 0
           ? `本文を保存しない自動候補キューが ${candidateSummary.total} 件あります（高確度 ${candidateSummary.high_confidence} 件、Recall候補 ${candidateSummary.categories['recall-likely']} 件、Remember候補 ${candidateSummary.categories['remember-candidate']} 件、未解決候補 ${candidateSummary.categories['unresolved-candidate']} 件、作業台帳候補 ${candidateSummary.categories['work-item-candidate']} 件）。${rememberReady > 0 ? `会話終了Remember候補を ${rememberReady} 件生成しました。` : ''}${workReady > 0 ? `作業台帳候補を ${workReady} 件生成しました。` : ''}${checkpointReady > 0 ? `checkpoint候補を ${checkpointReady} 件生成しました。` : ''}出所と不確実性を確認し、必要な候補だけを通常手順で扱う。`

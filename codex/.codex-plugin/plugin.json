@@ -1,6 +1,6 @@
 {
   "name": "priors",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
   "author": {
     "name": "Priors"
