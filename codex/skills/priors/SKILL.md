@@ -35,6 +35,16 @@ design notes, or handoffs.
 
 - Write one memory per subject. A deployment report, a review or a "remaining work" note that bundles several subjects is hard to find for any of them: the body's key terms are diluted and no question about one subject ranks it. Split by subject and keep the deployment or work record itself short, linking the subject memories with `relates_to`. The same when adding a subject to an existing memory: a new memory, not a longer one.
 
+## Search card
+
+- When `priors_contract.features` lists `search_card_fields`, give each new text a search card: `search_summary` and `keywords` on `remember`, on each `capture` item, on `amend` when it writes a new text (correct, replace or object), on `maintain` revise and on each split / merge output. At most 10 cards in one request.
+- `search_summary` (1-600 characters): the question, claim, conditions and conclusion. Keep exceptions, negations, open points, the key numbers and names, and whether something was measured, inferred or proposed. Only what the body states: a number or proper noun that is not in the body is refused.
+- `keywords` (up to 24, each 1-64 characters): proper nouns, numbers, versions, abbreviations and aliases. Duplicates after normalization are refused, not removed.
+- The response carries `search_card` (per item / output for capture and maintain). `state: ok` is written; `state: pending` means the memory is found only by its body and title until a card is written with the `search_card` tool (`id`, `expected_version` = the current version, `search_summary`, `keywords`, and a required `idempotency_key`; resend with the same key).
+- `pending` with `error {code, field, reason}`: the memory itself is saved. Do not resend the write; fix the card and write it with `search_card`.
+- `invalid_input` whose field is `search_summary` / `keywords` (or `items.N.…` / `outputs.N.…`): nothing was saved, the memory neither. Fix the card or drop it and resend with the same key.
+- The summary text is never echoed back. `get` shows the shown version's card (`search_card`).
+
 ## Daily cross-client route
 
 - For an ambiguous continuation, call `brief` without a work ID and present the
