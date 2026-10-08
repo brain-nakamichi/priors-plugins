@@ -5,7 +5,7 @@
  */
 'use strict';
 
-const { lastAuditEvent, recordStopInvocation, auditHealth } = require('./decision-audit.js');
+const { lastAuditEvent, recordStopInvocation, auditHealth, inputSafetySummary, inputSafetyGuidance } = require('./decision-audit.js');
 const {
   summarizeProactiveCandidates,
   materializeRememberCandidate,
@@ -22,7 +22,7 @@ function candidateGuidance(summary) {
   if (summary.categories['recall-likely'] > 0) steps.push('Recall候補: context_open → recall');
   if (summary.categories['remember-candidate'] > 0) steps.push('Remember候補: 出所確認 → guard → remember/amend');
   if (summary.categories['unresolved-candidate'] > 0) steps.push('未解決候補: checkpoint または問いの確認');
-  if (summary.categories['work-item-candidate'] > 0) steps.push('作業台帳候補: briefで目的・完了条件が最も一致するworkを自動選択し、該当がなければwork_createを検討');
+  if (summary.categories['work-item-candidate'] > 0) steps.push('作業台帳候補: briefで同じ事象のworkを確認し、曖昧な候補は自動選択しない');
   return steps.length > 0 ? `候補別の次の確認: ${steps.join('、')}。` : '';
 }
 
@@ -42,7 +42,8 @@ try {
   try { recordStopInvocation({ stopHookActive: input.stop_hook_active === true }); } catch { /* diagnostics are best effort */ }
   // Claude may invoke Stop again while continuing after a hook. Do not emit
   // another reminder in that re-entrant path.
-  if (input.stop_hook_active === true || explicitDecisionRecorded()) process.exit(0);
+  const safetyGuidance = inputSafetyGuidance(inputSafetySummary());
+  if (input.stop_hook_active === true || explicitDecisionRecorded() && !safetyGuidance) process.exit(0);
   const autonomousRemember = process.env.PRIORS_AUTO_REMEMBER !== '0';
   // Generate one session-scoped Remember candidate from the pending local
   // signals.  This stores hashes/provenance only and never auto-confirms it.
@@ -80,6 +81,8 @@ try {
           ? `監査ログ診断: 未確定turn-start ${health.pending_turn_starts}件、壊れた行 ${health.invalid_lines}件。警告のみで会話やPriors書込は停止しない。`
           : '',
         '会話本文・token・接続情報は監査ログやPriors本文へ写さない。',
+        safetyGuidance,
+        '延期・手元作業や認証情報対応は会話の一覧だけに置かず、安全な要旨で既存workを確認し保存する。否定・引用・完了は区別する。秘密疑いターンはhash無し監査と候補キュー不使用が正常で、キューが空でも作業保存の不要を意味しない。',
       ].join('\n'),
     },
   }));

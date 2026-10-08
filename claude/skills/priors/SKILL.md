@@ -1,6 +1,6 @@
 ---
 name: priors
-description: Priors（長期記憶のMCPサーバー）を毎ターン使うか判断し、必要なときだけ安全に残す・思い出す・テーマを決める手順。毎回 use-read / write-candidate / skip のいずれかを選び、使わない場合もローカル監査ログへ記録する。
+description: Priorsの参照・保存・テーマ選択を安全に行う。毎ターンuse-read / write-candidate / skipを選び、ローカル監査に記録する。
 ---
 
 # Priors｜記憶を残す・思い出す・テーマを決める
@@ -15,7 +15,7 @@ description: Priors（長期記憶のMCPサーバー）を毎ターン使うか�
 
 ### 自発判断チェック（Claude / Codex 共通）
 
-明示的な「Recallして」「Rememberして」がなくても、応答や作業の前に次の三つを短く点検する。
+明示依頼がなくても、応答前に次の三つを点検する。
 
 1. **Recall候補**: 既存の決定・仕様・制約・過去の作業・本番/rollbackの前提が判断に影響するか。
 2. **Remember候補**: 次の会話で役立つか（決定・手順・落とし穴・知見のほか、未決定の相談・比較案・仮説も）。
@@ -23,14 +23,20 @@ description: Priors（長期記憶のMCPサーバー）を毎ターン使うか�
 
 該当時だけ `context_open` → `recall` → 必要なら `guard` → 書込または`checkpoint`を選ぶ。兆候だけでtoolを自動呼出ししたり、本文を自動保存・確定したりしない。`PRIORS_AUTO_RECALL=1` の高確度再開兆候では応答前にRecall。
 
-基準は「確定したか」でなく「後で役立つか」。回答をまとめた時点で質問・要望と回答を合わせて点検し、役立つなら「記憶して」を待たず保存する。継続する要望・比較案・検討・知見は`remember`（未決定はhypothesis／working等の型と不確実性・出所を付ける）、作業途中の状況は`working_cache_write`。要旨は「求めたこと／提案・判断／未決定の点／再開の手がかり」で、提案を決定として書かない。Tier A「プログラム修正時は修正内容を記憶する」を適用し、変更内容・commit・検証・配備状態を含む。`PRIORS_AUTO_REMEMBER=0`のときだけ旧候補箱モードに戻す。
+基準は「後で役立つか」。回答時に質問と応答を点検し、要望・検討・知見は`remember`、途中状態は`working_cache_write`へ自発保存する。未決定は型・不確実性・出所を付け、提案を決定にしない。要旨は「依頼／判断／未決定／再開情報」。Tier Aの修正記憶に変更・commit・検証・配備状態を残す。`PRIORS_AUTO_REMEMBER=0`だけ旧候補箱モード。
 候補種別ごとの次の確認: Recallは `context_open` → `recall`、Rememberは `guard` → `remember` / `amend`、未解決は `checkpoint`。未検出を不要の証明とみなさず点検する。
 
-UserPromptSubmit フックは判定を毎回リマインドし、入力本文は保存せずハッシュ値だけ保留記録する。判定は `hooks/record-decision.js --decision <判定> --client claude --phase turn-start|conversation-end` で `~/.priors/decision-audit.jsonl` に追記する（Priors 本文と別物。トークン・本文・接続情報を含めない）。
+UserPromptSubmitは毎回判定を促す。秘密疑い・検査不能は自動送信・hash・候補を省略し、通常入力はhashだけ記録。`hooks/record-decision.js --decision <判定> --client claude --phase turn-start|conversation-end`で監査する。本文・秘密は残さず、未検出は安全の証明ではない。
 
-会話終了前にも判定し、自律Rememberモードでは `context_open` → `recall` → `guard` → `remember` / `amend` を完了する。保存は成功応答の ID・版を確認して完了とし、`record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <id@version,...>` で結果を記録する（失敗は失敗として残す）。未判定で終了しない。終了判定で候補を確認済みにする場合、`use-read` はRecall候補だけを対象にし、`write-candidate` と `skip` は候補全体を確認済みにする。
+終了前も判定し、保存時は `context_open` → `recall` → `guard` → `remember` / `amend` の成功ID・版を確認する。`record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <id@version,...>`で結果を記録し、未判定で終了しない。確認済みは`use-read`ならRecall候補だけ、`write-candidate`と`skip`なら候補全体。
 
-未実装事項・検証・再開条件は`work_item`台帳で自発管理する。「未実装一覧」「残件」「次に進める」では`brief`を呼び、目的・完了条件が最も一致するworkを選ぶ。無ければ`work_create`する。実装・検証は`work_event`へ追記、完了は`resolve`、再発は`reopen`。検証なしresolveや解決済み記憶の削除はしない。旧候補モードでは曖昧な候補は提示して選択を待つ。
+未実装・検証・再開条件は`work_item`へ。「残件」等では`brief`で同じ事象の明示IDを再利用し、曖昧な候補は提示して選択を待つ。実装・検証は`work_event`、完了は`resolve`、再発は`reopen`。未検証resolveや解決済み記憶の削除は禁止。
+
+### 延期した対応・認証情報の露出
+- 該当時は同梱の [保存・再開手順](deferred-work.md) を読む。採用した未完了対応を会話の一覧だけに置かず、同じ事象のworkへ保存する。否定・引用・完了を区別する。
+- 秘密本文・部分値・hashはshellやqueryにも転記せず安全な要旨を使う。検出は侵害の証明ではない。値無しの申告は検索を抑止しない。フックは利用者入力だけが対象でtool出力は対象外、クライアント会話ログの実値は消せない。
+- 全対象の交換または不要理由、利用先更新と必要な検証が完了条件。自動失効・発行は禁止。既知IDはfull brief、曖昧なら自動選択しない。新事象はUUIDのidempotency_key、結果不明は同じキー・引数で再送する。
+カードは[共通手順](search-card-recovery.md)に従う。
 
 ## 1. 最初に触れる時点で `context_open` を呼ぶ
 
@@ -51,10 +57,10 @@ UserPromptSubmit フックは判定を毎回リマインドし、入力本文は
 
 ### エージェントの作業メモ（working cache）
 - 新しいセッション、テーマ切替、圧縮後は `working_cache_read` を読み、`task_key` か `work_id` が一致するメモだけを `get` する。更新日時だけで選ばない。
-- 相談開始時に元の問い・目的・条件をメモに残し、提案・未確認、選ばれた実行・進捗を同じメモに加える。`replace` は全置換なので更新時も元の問い・目的・条件を書き戻す。版競合なら再取得し、未完了メモを捨てない。
+- 相談の問い・目的・条件、提案・未確認・進捗を同じメモへ。`replace`は全置換なので元の条件も書き戻す。版競合は再取得、未完了メモは捨てない。
 - 元の問いや条件が今後も役立つと分かった時点で理由とともに `remember` へ（確定・完了を待たない。最初から重要なら直接長期へ）。作業中はメモも維持。
-- 長期記憶と参照を残した完了メモは `delete`。作業メモの成功を長期記憶の成功と扱わず、失敗しても本来の作業を続ける。
-- 転送は `scripts/asset-transfer.js publish|fetch|resume`。失敗は未完了で記録。
+- 長期記憶と参照を残した完了メモは`delete`。作業メモ成功は長期保存の証明ではない。失敗しても作業を続ける。
+- 転送は`scripts/asset-transfer.js publish|fetch|resume`。失敗は未完了。
 
 テーマ追加の可能性があれば `theme_list` で最新一覧を取る（一覧に無いだけで不存在としない）。
 

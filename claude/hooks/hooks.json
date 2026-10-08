@@ -33,6 +33,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__priors__(remember|amend|capture|work_create|work_event)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-save.js\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

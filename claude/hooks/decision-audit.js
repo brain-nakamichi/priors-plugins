@@ -6,7 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const DECISIONS = new Set(['pending', 'use-read', 'write-candidate', 'skip']);
-const PHASES = new Set(['unknown', 'turn-start', 'conversation-end']);
+const PHASES = new Set(['unknown', 'turn-start', 'conversation-end', 'tool-save']);
 
 function auditPath(env = process.env) {
   const configured = env.PRIORS_DECISION_AUDIT_FILE;
@@ -39,7 +39,7 @@ function normalizeSave(save) {
   return { outcome: save.outcome, ids };
 }
 
-function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown', save }, env = process.env) {
+function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown', save, inputSafety, sessionId }, env = process.env) {
   if (!DECISIONS.has(decision)) throw new Error('invalid decision');
   if (!PHASES.has(phase)) throw new Error('invalid phase');
   const saveRecord = normalizeSave(save);
@@ -52,13 +52,44 @@ function recordDecision({ decision, client, promptHash, source = 'explicit', pha
     client: typeof client === 'string' && client ? client : 'unknown',
     source,
     phase,
-    ...(typeof promptHash === 'string' && /^[0-9a-f]{64}$/.test(promptHash)
+    ...(validSession(sessionId) ? { session_id: sessionId } : {}),
+    ...(['suspected', 'uninspectable', 'reported'].includes(inputSafety)
+      ? { input_safety: inputSafety, safety_notice_id: crypto.randomUUID() } : {}),
+    ...(!['suspected', 'uninspectable'].includes(inputSafety) && typeof promptHash === 'string' && /^[0-9a-f]{64}$/.test(promptHash)
       ? { prompt_sha256: promptHash } : {}),
     ...(saveRecord ? { save: saveRecord } : {}),
   };
   fs.appendFileSync(file, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
   try { fs.chmodSync(file, 0o600); } catch { /* Windows / ACLs: best effort */ }
   return { file, event };
+}
+
+// Prompt-independent notices for the latest turn. Completion of an ordinary
+// save is not proof that credential work exists, so retain the notice at Stop.
+// A new turn after an explicit end starts a new reminder window.
+function inputSafetySummary(env = process.env, client = 'claude') {
+  const counts = { suspected: 0, uninspectable: 0, reported: 0 };
+  try {
+    const lines = fs.readFileSync(auditPath(env), 'utf8').trim().split(/\r?\n/).slice(-256);
+    let ended = false;
+    for (const line of lines) {
+      let event; try { event = JSON.parse(line); } catch { continue; }
+      if (event?.schema !== 'priors.decision-audit.v1' || event.client !== client) continue;
+      if (ended && event.phase === 'turn-start') {
+        counts.suspected = counts.uninspectable = counts.reported = 0;
+        ended = false;
+      }
+      if (Object.hasOwn(counts, event.input_safety)) counts[event.input_safety]++;
+      if (event.phase === 'conversation-end' && event.source === 'explicit') ended = true;
+    }
+  } catch { /* do not echo errors */ }
+  return counts;
+}
+
+function inputSafetyGuidance(counts) {
+  return counts.suspected + counts.uninspectable + counts.reported > 0
+    ? `認証情報対応の確認: このターンの秘密疑い ${counts.suspected}件、検査不能 ${counts.uninspectable}件、露出申告 ${counts.reported}件。値を含まない作業項目があるか確認してください。同じ事象は既存workを再利用し、不要なら理由を残す。件数はローカルの印であり漏えい・保存不足の証明ではありません。`
+    : '';
 }
 
 function recordStopInvocation({ stopHookActive = false } = {}, env = process.env) {
@@ -81,7 +112,7 @@ function lastAuditEvent(env = process.env) {
   try {
     const lines = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).filter(Boolean);
     if (!lines.length) return null;
-    return JSON.parse(lines.at(-1));
+    return lines.map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter((event) => event && event.phase !== 'tool-save').at(-1) || null;
   } catch {
     return null;
   }
@@ -109,7 +140,31 @@ function auditHealth(env = process.env, maxLines = 256) {
   return { events, invalid_lines: invalid, pending_turn_starts: turnPending, pending_conversation_end: endPending };
 }
 
-module.exports = {
+function validSession(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value); }
+function observedSaves(sessionId, client, env = process.env) {
+  if (!validSession(sessionId)) throw new Error('manual_references_required');
+  // Bound audit reading; do not silently treat a truncated window as complete.
+  const stat = fs.statSync(auditPath(env));
+  if (stat.size > 4 * 1024 * 1024) throw new Error('manual_references_required');
+  const lines = fs.readFileSync(auditPath(env), 'utf8').trim().split(/\r?\n/);
+  let found = false; const ids = new Set();
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event = JSON.parse(lines[i]);
+    if (event.schema !== 'priors.decision-audit.v1') throw new Error('manual_references_required');
+    if (event.client !== client || event.session_id !== sessionId) continue;
+    if (event.phase === 'turn-start' && event.source === 'hook') { found = true; break; }
+    if (event.phase === 'tool-save') {
+      const save = normalizeSave(event.save);
+      if (!save || save.outcome !== 'recorded' || event.source !== 'hook') throw new Error('manual_references_required');
+      for (const id of save.ids) ids.add(id);
+      if (ids.size > 20) throw new Error('manual_references_required');
+    }
+  }
+  if (!found || !ids.size) throw new Error('manual_references_required');
+  return [...ids];
+}
+module.exports = { validSession, observedSaves,
   DECISIONS, PHASES, auditPath, stopDiagnosticPath, hashPrompt,
   recordDecision, recordStopInvocation, lastAuditEvent, auditHealth,
+  inputSafetySummary, inputSafetyGuidance,
 };

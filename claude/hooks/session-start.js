@@ -15,7 +15,7 @@
  *   2. cwd から git ルート（無ければ 3 階層まで。ファイルシステムの root は
  *      候補から除く）を上方探索し、`.claude/priors.local.json` →
  *      `.claude/priors.json` の順に設定を探す。**存在するのに壊れている場合は
- *      fallback せず注記して終える。** 両方とも存在しないときだけ何も出さず終了する。
+ *      fallback せず注記して終える。** 両方無い場合は ~/.priors/config.json の明示的な作業場所対応・既定テーマを参照する。
  *   3. token（`--token-file` → `PRIORS_HOOK_TOKEN_FILE` → `PRIORS_HOOK_TOKEN_V1`
  *      の優先順）が無ければ、その旨だけ注記して終了する。
  *   4. `PRIORS_MCP_URL` を検証する（https 必須。loopback のみ http 可。ホストは
@@ -123,121 +123,15 @@ function statExists(p) {
   }
 }
 
-function isFsRoot(dir) {
-  return path.dirname(dir) === dir;
-}
-
-/** cwd からファイルシステムの根まで、親ディレクトリを列挙する。 */
-function walkUpDirs(startDir) {
-  const dirs = [];
-  let cur = path.resolve(startDir);
-  const seen = new Set();
-  while (!seen.has(cur)) {
-    dirs.push(cur);
-    seen.add(cur);
-    const parent = path.dirname(cur);
-    if (parent === cur) break;
-    cur = parent;
-  }
-  return dirs;
-}
-
-/** `.git`（ディレクトリまたは worktree 用ファイル）がある最初の階層の index。無ければ -1。 */
-function findGitRootIndex(dirs) {
-  for (let i = 0; i < dirs.length; i++) {
-    if (statExists(path.join(dirs[i], '.git'))) return i;
-  }
-  return -1;
-}
-
-/** 探索対象ディレクトリの列（cwd が先頭）。git ルートがあればそこまで、
- *  無ければ cwd 自身 + 上位 3 階層（計 4 ディレクトリ）に限る。
- *  git ルートが無い場合のフォールバックでは、ファイルシステムの root
- *  （`C:\` や `/`）自体は候補から除く。 */
-function getSearchDirs(cwd) {
-  const all = walkUpDirs(cwd);
-  const gitIdx = findGitRootIndex(all);
-  if (gitIdx >= 0) return all.slice(0, gitIdx + 1);
-  const withoutRoot = all.filter((d) => !isFsRoot(d));
-  return withoutRoot.slice(0, Math.min(4, withoutRoot.length));
-}
-
-/** 1 ファイルを読み、状態を返す。
- *  `{status:'missing'}` | `{status:'invalid', reason}` | `{status:'ok', theme, workKinds}` */
-function readConfigFile(filePath) {
-  let raw;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch (err) {
-    if (err && err.code === 'ENOENT') return { status: 'missing' };
-    return { status: 'invalid', reason: 'unreadable' };
-  }
-  let data;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return { status: 'invalid', reason: 'json_parse_error' };
-  }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return { status: 'invalid', reason: 'not_an_object' };
-  }
-  const theme = data.theme;
-  if (typeof theme !== 'string' || !THEME_RE.test(theme)) {
-    return { status: 'invalid', reason: 'theme_invalid' };
-  }
-  let workKinds;
-  if (data.work_kinds !== undefined) {
-    if (!Array.isArray(data.work_kinds) || !data.work_kinds.every((x) => typeof x === 'string')) {
-      return { status: 'invalid', reason: 'work_kinds_invalid' };
-    }
-    workKinds = data.work_kinds;
-  }
-  return { status: 'ok', theme, workKinds };
-}
-
+const { resolveConfig: findConfig } = require('./config-resolver.js');
+const { makeCache } = require('./offline-context-cache.js');
 const CONFIG_INVALID_REASON_TEXT = {
-  unreadable: '読み取れない',
-  json_parse_error: 'JSON として解釈できない',
-  not_an_object: 'オブジェクトの形になっていない',
-  theme_invalid: 'theme の形式が不正（大文字始まりの英数字、例: GEN）',
-  work_kinds_invalid: 'work_kinds が文字列の配列になっていない',
+  unreadable: '読み取れない', json_parse_error: 'JSON として解釈できない',
+  not_an_object: 'オブジェクトではない', theme_invalid: 'theme の形式が不正',
+  work_kinds_invalid: 'work_kinds の形式が不正', config_too_large: 'サイズ上限を超える',
+  user_schema_invalid: '利用者設定のschemaが不正', projects_invalid: '対応表の形式が不正',
+  duplicate_root: '対応表に同じ作業場所が重複している',
 };
-
-/**
- * cwd から上方探索し、設定を探す。
- *
- * `priors.local.json` が**存在するのに壊れている**場合は、`priors.json` へ
- * fallback せず、その場で `invalid` を返す（黙って別ファイルに逃げない）。
- * 存在しない場合だけ `priors.json` を見る。両方とも存在しない場合だけ
- * 次のディレクトリへ進む。
- *
- * 戻り値: `{kind:'ok', theme, workKinds, path}` | `{kind:'invalid', path, reason}`
- *       | `{kind:'none'}`
- */
-function findConfig(cwd) {
-  const dirs = getSearchDirs(cwd);
-  for (const dir of dirs) {
-    const localPath = path.join(dir, '.claude', 'priors.local.json');
-    const local = readConfigFile(localPath);
-    if (local.status === 'ok') {
-      return { kind: 'ok', theme: local.theme, workKinds: local.workKinds, path: localPath };
-    }
-    if (local.status === 'invalid') {
-      return { kind: 'invalid', path: localPath, reason: local.reason };
-    }
-
-    const normalPath = path.join(dir, '.claude', 'priors.json');
-    const normal = readConfigFile(normalPath);
-    if (normal.status === 'ok') {
-      return { kind: 'ok', theme: normal.theme, workKinds: normal.workKinds, path: normalPath };
-    }
-    if (normal.status === 'invalid') {
-      return { kind: 'invalid', path: normalPath, reason: normal.reason };
-    }
-    // 両方 missing → 次のディレクトリへ
-  }
-  return { kind: 'none' };
-}
 
 // ============================================================
 // env・引数・token
@@ -573,6 +467,13 @@ function buildDataLines(theme, themeInfo, payload, initWarnings, instructionsUna
     appendItemLines(lines, pinned.items);
   }
 
+  const unresolved = frames.unresolved;
+  if (unresolved && Array.isArray(unresolved.items) && unresolved.items.length > 0) {
+    lines.push('unresolved:');
+    appendItemLines(lines, unresolved.items);
+  }
+  lines.push('作業台帳: この下見では未取得。必要ならAIの認証でbriefを確認する。');
+
   const handoff = frames.handoff;
   if (handoff && Array.isArray(handoff.items) && handoff.items.length > 0) {
     lines.push('handoff:');
@@ -816,12 +717,23 @@ async function main() {
     urlCheck.url.href, tokenInfo.token, cfg.theme, cfg.workKinds, sessionId, deadlineMs,
   );
 
-  if (result.kind === 'timeout') { writeFailure('timeout'); return; }
-  if (result.kind === 'theme_unknown') { writeFailure('theme_unknown', cfg.theme); return; }
-  if (result.kind === 'auth') { writeFailure('auth'); return; }
-  if (result.kind === 'tool_error') { writeFailure('tool_error', safeErrorCode(result.code)); return; }
-  if (result.kind === 'unreachable') { writeFailure('unreachable'); return; }
-  if (result.kind === 'malformed') { writeFailure('malformed'); return; }
+  const cache = makeCache({ endpoint: urlCheck.url.href, token: tokenInfo.token, theme: cfg.theme, workKinds: cfg.workKinds });
+  if (result.kind !== 'ok') {
+    if (['auth', 'theme_unknown', 'tool_error'].includes(result.kind)) cache?.remove();
+    if (['timeout', 'unreachable'].includes(result.kind)) {
+      const old = cache?.load();
+      if (old) {
+        const message = 'Priors: 通信失敗。未確認の古い写し（取得日時: ' + old.fetched_at + '、有効期限7日）。現在の認可・状態は未確認。写しから書込や作業選択をしない。';
+        const text = buildAdditionalContext(cfg.theme, null, old, [], true);
+        writeHookOutput(message + '\n' + text, message);
+        return;
+      }
+    }
+    if (result.kind === 'tool_error') writeFailure('tool_error', safeErrorCode(result.code));
+    else writeFailure(result.kind, cfg.theme);
+    return;
+  }
+  cache?.save(result.payload);
 
   // result.kind === 'ok'
   const additionalContext = buildAdditionalContext(

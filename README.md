@@ -16,7 +16,7 @@ token は設定ファイルへ貼り付けず、案内された安全な環境�
 `codex/` を Codex のプラグイン管理画面またはローカルプラグイン登録から指定します。Windows CLI では `codex.cmd` を使えます。
 
 ```powershell
-codex.cmd plugin marketplace add <このリポジトリをcloneした場所>\codex
+codex.cmd plugin marketplace add <このリポジトリをcloneした場所>
 codex.cmd plugin add priors@priors
 codex.cmd plugin list
 ```
@@ -25,8 +25,8 @@ codex.cmd plugin list
 
 ## 配布版
 
-- Claude plugin: 0.1.32
-- Codex plugin: 0.1.36
+- Claude plugin: 0.1.36
+- Codex plugin: 0.1.40
 
 Priors サーバーへの接続先は `https://priors-brain9.vercel.app/mcp` です。
 

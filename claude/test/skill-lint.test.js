@@ -25,7 +25,7 @@ test('no theme prefix examples (theme argument or real short IDs)', () => {
   const ids = body.match(/\b[A-Z][A-Z0-9]{1,7}-c?\d+\b/g) || [];
   assert.deepEqual(ids, [], `real short IDs found: ${ids.join(', ')}`);
   const prefixes = (body.match(/\b[A-Z][A-Z0-9]{1,7}\b/g) || [])
-    .filter((w) => !['ZZPROBE', 'ID', 'MCP', 'JSON', 'CLAUDE', 'DB', 'A', 'B'].includes(w));
+    .filter((w) => !['ZZPROBE', 'ID', 'MCP', 'JSON', 'CLAUDE', 'DB', 'AI', 'UUID', 'A', 'B'].includes(w));
   assert.deepEqual(prefixes, [], `possible theme prefixes found: ${prefixes.join(', ')}`);
 });
 

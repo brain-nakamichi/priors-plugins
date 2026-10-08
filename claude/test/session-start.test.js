@@ -1222,3 +1222,51 @@ test('(j3) context_open が失敗しても server 契約の更新案内は出る
     await closeServer(server);
   }
 });
+
+test('GEN944 user default starts context without sending cwd or mapping roots', async () => {
+  const calls=[]; const server=await startFakeServer(makeHandler({themes:SAMPLE_THEMES,warnings:[],payload:samplePayload(),calls}));
+  try {
+    const dir=mkTmpDir(); const file=path.join(dir,'user.json');
+    fs.writeFileSync(file,JSON.stringify({schema_version:1,default_theme:'GEN',projects:[{root:dir,theme:'GEN'}]}));
+    const result=await runHook({cwd:dir,env:{PRIORS_USER_CONFIG_FILE:file,PRIORS_HOOK_TOKEN_V1:DUMMY_TOKEN,PRIORS_MCP_URL:serverUrl(server)},stdinObj:{cwd:dir}});
+    assert.match(parseHookOutput(result.stdout).additionalContext,/\[GEN-1\]/);
+    assert.ok(!JSON.stringify(calls).includes(dir)); assert.ok(!JSON.stringify(calls).includes('projects'));
+  } finally { await closeServer(server); }
+});
+test('GEN944 malformed user settings stop before initialize', async () => {
+  const calls=[];const server=await startFakeServer(makeHandler({themes:SAMPLE_THEMES,warnings:[],payload:samplePayload(),calls}));
+  try {
+    const dir=mkTmpDir();const file=path.join(dir,'user.json');fs.writeFileSync(file,'{');
+    const result=await runHook({cwd:dir,env:{PRIORS_USER_CONFIG_FILE:file,PRIORS_HOOK_TOKEN_V1:DUMMY_TOKEN,PRIORS_MCP_URL:serverUrl(server)},stdinObj:{cwd:dir}});
+    assert.match(parseHookOutput(result.stdout).systemMessage,/JSON/);assert.equal(calls.length,0);
+  } finally { await closeServer(server); }
+});
+
+test('GEN950 successful context copy falls back only for connectivity, never authentication or settings', async () => {
+  const profile=mkTmpDir();const cwd=mkTmpDir();writeConfig(cwd,'priors.json',{theme:'GEN'});
+  let phase='good';const p=samplePayload({actor_id:'00000000-0000-4000-8000-000000000001'});
+  for(const item of p.frames.pinned.items)item.version=1;
+  p.frames.unresolved.items=[{id:'GEN-20',version:1,title:'still open',body:'not stored'}];
+  const calls=[];const good=makeHandler({themes:SAMPLE_THEMES,warnings:[],payload:p,calls});
+  const server=await startFakeServer((body,req)=>{
+    if(phase==='auth')return {status:401,rawBody:'unauthorized'};
+    if(phase==='tool')return {body:{jsonrpc:'2.0',id:body.id,error:{code:-32603,message:'synthetic private error'}}};
+    if(phase==='malformed')return {rawBody:'{'};
+    if(phase==='down')return {status:503,rawBody:'offline'};
+    if(phase==='timeout')return {delayMs:200,status:503,rawBody:'offline'};
+    return good(body,req);
+  });
+  try {
+    const env={USERPROFILE:profile,HOME:profile,PRIORS_CONTEXT_CACHE:'1',PRIORS_HOOK_TOKEN_V1:DUMMY_TOKEN,PRIORS_MCP_URL:serverUrl(server)};
+    const run=(more={})=>runHook({cwd,env:{...env,...more},stdinObj:{cwd}});
+    await run();const cacheDir=path.join(profile,'.priors','context-cache');assert.equal(fs.readdirSync(cacheDir).length,1);
+    phase='down';let out=parseHookOutput((await run()).stdout);assert.match(out.systemMessage,/未確認の古い写し/);assert.match(out.additionalContext,/取得日時/);assert.match(out.additionalContext,/重要な方針の本文/);assert.match(out.additionalContext,/still open/);assert.ok(!out.additionalContext.includes('not stored'));assert.match(out.additionalContext,/作業台帳.*未取得/);assert.match(out.additionalContext,/PRIORS_DATA_BEGIN/);
+    out=parseHookOutput((await run({PRIORS_CONTEXT_CACHE:'0'})).stdout);assert.ok(!out.systemMessage.includes('古い写し'));
+    out=parseHookOutput((await run({PRIORS_HOOK_TOKEN_V1:'pv1a'+'C'.repeat(16)+'D'.repeat(43)})).stdout);assert.ok(!out.systemMessage.includes('古い写し'));
+    phase='timeout';out=parseHookOutput((await run({PRIORS_HOOK_DEADLINE_MS:'100'})).stdout);assert.match(out.systemMessage,/古い写し/);
+    phase='malformed';out=parseHookOutput((await run()).stdout);assert.ok(!out.systemMessage.includes('古い写し'));assert.equal(fs.readdirSync(cacheDir).length,1);
+    phase='auth';out=parseHookOutput((await run()).stdout);assert.ok(!out.systemMessage.includes('古い写し'));assert.equal(fs.readdirSync(cacheDir).length,0);
+    phase='good';await run();phase='tool';out=parseHookOutput((await run()).stdout);assert.ok(!out.systemMessage.includes('古い写し'));assert.equal(fs.readdirSync(cacheDir).length,0);
+    phase='good';await run();phase='down';writeConfig(cwd,'priors.json','{');out=parseHookOutput((await run()).stdout);assert.ok(!out.systemMessage.includes('古い写し'));
+  } finally { await closeServer(server); }
+});

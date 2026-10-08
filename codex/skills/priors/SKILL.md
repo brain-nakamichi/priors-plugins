@@ -35,6 +35,8 @@ design notes, or handoffs.
 
 - Write one memory per subject. A deployment report, a review or a "remaining work" note that bundles several subjects is hard to find for any of them: the body's key terms are diluted and no question about one subject ranks it. Split by subject and keep the deployment or work record itself short, linking the subject memories with `relates_to`. The same when adding a subject to an existing memory: a new memory, not a longer one.
 
+検索カードの作成・pending修復時は同梱の [検索カード修復手順](search-card-recovery.md) を読む。本文重複を避け、カードだけ一度修復し、版競合・所有・拒否の停止条件を守る。
+
 ## Search card
 
 - When `priors_contract.features` lists `search_card_fields`, give each new text a search card: `search_summary` and `keywords` on `remember`, on each `capture` item, on `amend` when it writes a new text (correct, replace or object), on `maintain` revise and on each split / merge output. At most 10 cards in one request.
@@ -214,6 +216,15 @@ These are light cues, never a gate; the work proceeds without them.
 - Use `scripts/asset-transfer.js publish <local_path> <theme_id> [idempotency_key]`, `fetch <asset_id> <destination>`, or `resume <operation_id> <theme_id>` for file transfer. It reads `PRIORS_ASSET_ENDPOINT` and the client token from the environment, stores only bounded local retry metadata, and never claims sharing without an available asset status.
 
 ## Codex standard route
+
+### Deferred work and credential exposure
+
+- Record adopted unfinished deferred actions (後回し・あとで・延期・user-side operations) in a durable work, not only a chat list or short-lived memo. Distinguish negation, quotation and completion; verify the saved ID. Deferral never means completion or cancellation.
+- Treat secret-shaped input or an exposure report as suspicion, not proof of validity or compromise. Never copy its raw text, partial values or hash into shell arguments, tool queries, logs or memory. Use a safe summary. Do not retrieve, revoke or issue credentials automatically. Codex has no registered UserPromptSubmit: the explicit safe-summary route is required; a file on disk does not establish runtime protection.
+- On recognizing one, run `scripts/record-input-safety.js --kind suspected|reported|uninspectable` with only the fixed kind, never a value. This records a random, input-independent notice for Stop. Value-free reports need not suppress safe search. Input hooks cover only user prompts, not tool output, and do not erase secrets already in client conversation logs.
+- Reuse work only after checking service, purpose and incident. Never select by newest date or word match alone. Read full brief for a known ID; partial/empty compact output is not absence. An explicit ID not found must not fall back to creation. Do not modify the other AI's work; share your own evidence. For closed work, distinguish reopening the same incident from a new exposure.
+- For a genuinely new incident, supply a random UUID idempotency_key unrelated to prompt/secret. Unknown outcome: retry identical key and arguments, not a new operation. Re-read versions before work_event; reconcile conflicts. Confirm successful storage or state that it remains unsaved.
+- Completion covers all confirmed targets: old revocation/new issuance or verified reason it is unnecessary, all required consumer updates and connections, authorized non-secret revocation confirmation. Aggregate the three states over all targets; record partial evidence separately, distinguishing reports from measurements. New connectivity alone does not prove old revocation. Redeploy only if independently required. Never request or test an old value again.
 
 Lifecycle hooks are diagnostic only and are not the source of truth for an
 ordinary Codex chat. On every turn, explicitly run

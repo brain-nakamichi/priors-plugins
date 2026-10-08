@@ -12,29 +12,10 @@ const MAX_OUTPUT_BYTES = 12000;
 const MAX_QUERY_CHARS = 4000;
 const THEME_RE = /^[A-Z][A-Z0-9]{1,7}$/;
 
-function config(cwd) {
-  let dir = path.resolve(cwd || process.cwd());
-  for (let i = 0; i < 8; i++) {
-    const gitRoot = fs.existsSync(path.join(dir, '.git'));
-    for (const name of ['priors.local.json', 'priors.json']) {
-      const file = path.join(dir, '.claude', name);
-      let raw;
-      try { raw = fs.readFileSync(file, 'utf8'); } catch (error) {
-        if (error && error.code === 'ENOENT') continue;
-        return null;
-      }
-      try {
-        const data = JSON.parse(raw);
-        if (data && typeof data.theme === 'string' && THEME_RE.test(data.theme)) return { theme: data.theme, file };
-      } catch { return null; }
-      return null;
-    }
-    if (gitRoot) break;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
+const { resolveConfig } = require('./config-resolver.js');
+function config(cwd, env = process.env) {
+  const result = resolveConfig(cwd, { env });
+  return result.kind === 'ok' ? { theme: result.theme, file: result.path } : null;
 }
 
 function token(env) {
@@ -85,9 +66,16 @@ async function call(url, bearer, method, params, signal) {
 }
 
 async function main(input, env = process.env) {
+  // Gate before config/token reads and even initialize, including standalone use.
+  let inspection;
+  try { inspection = require('./sensitive-input.js').inspectSensitiveInput(input?.prompt); }
+  catch { inspection = { state: 'uninspectable', suppress_auto_recall: true }; }
+  if (inspection.suppress_auto_recall) return {
+    ok: false, reason: inspection.state === 'suspected' ? 'input_suspected_sensitive' : 'input_uninspectable',
+  };
   if (env.PRIORS_AUTO_RECALL !== '1') return { ok: false, reason: 'disabled' };
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-  const cfg = config(input.cwd);
+  const cfg = config(input.cwd, env);
   const bearer = token(env);
   const url = validUrl(env.PRIORS_MCP_URL, env);
   if (!cfg || !bearer || !url || !prompt) return { ok: false, reason: 'configuration' };
@@ -112,9 +100,11 @@ async function main(input, env = process.env) {
 }
 
 if (require.main === module) {
-  let input = {};
-  try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { /* empty */ }
-  main(input).then((result) => process.stdout.write(JSON.stringify(result))).catch(() => process.stdout.write(JSON.stringify({ ok: false, reason: 'error' })));
+  let read;
+  try { read = require('./bounded-input.js').readHookInput(); }
+  catch { read = { ok: false }; }
+  if (!read.ok) process.stdout.write(JSON.stringify({ ok: false, reason: 'input_uninspectable' }));
+  else main(read.input).then((result) => process.stdout.write(JSON.stringify(result))).catch(() => process.stdout.write(JSON.stringify({ ok: false, reason: 'error' })));
 }
 
 module.exports = { main, embeddedPayload, config, formatAutoRecall, validUrl, MAX_QUERY_CHARS };

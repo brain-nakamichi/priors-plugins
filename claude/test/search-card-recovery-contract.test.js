@@ -1,0 +1,10 @@
+'use strict';
+const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');
+const devCodex=path.resolve(__dirname,'../../codex-plugins/priors');
+const codex=fs.existsSync(devCodex)?devCodex:path.resolve(__dirname,'../../codex');
+const dirs=[path.resolve(__dirname,'../skills/priors'),path.join(codex,'skills/priors')];
+const guides=dirs.map(dir=>fs.readFileSync(path.join(dir,'search-card-recovery.md'),'utf8'));
+test('both clients load the same recovery guide',()=>{assert.equal(guides[0],guides[1]);for(const dir of dirs)assert.match(fs.readFileSync(path.join(dir,'SKILL.md'),'utf8'),/search-card-recovery\.md/);});
+test('three outcomes keep stored bodies and per-item batch state',()=>{const g=guides[0];for(const phrase of ['card ok','card pending','本文書込を繰り返さず','本文未保存','同じidempotency_key','項目ごとの状態','成功項目を再作成しない'])assert.ok(g.includes(phrase));});
+test('retry limits and changed-input keys are explicit',()=>{const g=guides[0];for(const phrase of ['一度だけ','二度目の拒否','同じ入力と同じキー','別の修復キー','本文の保存とカード未修復'])assert.ok(g.includes(phrase));});
+test('ownership version and refusal boundaries remain',()=>{const g=guides[0];for(const phrase of ['version_conflict','getで現在版・本文・所有','古い本文のカードを現在版へ流用しない','forbidden / quota / infrastructure','拒否値を復元・出力せず','本文へ架空の説明を足して検査を通さない','接頭辞だけの許可','秘密の実値は本文にも保存しない'])assert.ok(g.includes(phrase));});

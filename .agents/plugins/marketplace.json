@@ -1,0 +1,20 @@
+{
+  "name": "priors",
+  "interface": {
+    "displayName": "Priors"
+  },
+  "plugins": [
+    {
+      "name": "priors",
+      "source": {
+        "source": "local",
+        "path": "./codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
