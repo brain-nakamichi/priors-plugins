@@ -55,19 +55,11 @@ test('states the rules the design requires', () => {
   assert.match(body, /ZZPROBE/);
 });
 
-test('Codex/Claude 共通の自発判断チェックを明記する', () => {
-  assert.match(body, /自発判断チェック（Claude \/ Codex 共通）/);
-  assert.match(body, /Recall候補/);
-  assert.match(body, /Remember候補/);
-  assert.match(body, /未解決候補/);
-  assert.match(body, /兆候だけでtoolを自動呼出ししたり、本文を自動保存・確定したりしない/);
-  assert.match(body, /候補種別ごとの次の確認/);
-  assert.match(body, /use-read.*Recall候補だけ/);
-  assert.match(body, /write-candidate.*skip.*候補全体/);
-  assert.match(body, /work_item.*resolve.*reopen/);
-  assert.match(body, /曖昧な候補は提示して選択を待つ/);
-  assert.match(body, /work_item/);
-  assert.match(body, /未検出を不要の証明とみなさず/);
+test('Priors use is optional and has no automatic topic/Recall mode', () => {
+  assert.match(body, /使わない判断も有効/);
+  assert.match(body, /自動Recallはありません/);
+  assert.doesNotMatch(body, /PRIORS_AUTO_RECALL/);
+  assert.doesNotMatch(body, /自発判断チェック（Claude \/ Codex 共通）/);
 });
 
 test('length stays within a reasonable budget for a skill loaded on demand', () => {

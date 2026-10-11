@@ -1,36 +1,23 @@
 ---
 name: priors
-description: Priorsの参照・保存・テーマ選択を安全に行う。毎ターンuse-read / write-candidate / skipを選び、ローカル監査に記録する。
+description: Priorsの参照・保存・テーマ選択を必要に応じて安全に行う。
 ---
 
 # Priors｜記憶を残す・思い出す・テーマを決める
 
-## 0. 毎ターンの判定（省略しない）
+## 0. 必要に応じた自発判断
 
-各ユーザー入力について、応答や作業に入る前に次のいずれかを選ぶ。
+Priorsは必要なときに使う。毎ターンの判定、読取、書込、監査記録は必須ではない。
 
-- **use-read**: 既存の決定・経緯・制約が関係する。特に「続き」「再開」「既存仕様・制約」が明示された場合は、応答や作業の前に `context_open` → `recall` / `get` 等を先に実行する。
-- **write-candidate**: 次の会話でこの質問・要望・提案を覚えていると役立つ（未確定でもよい）。会話終了前に `context_open` → `recall` → `guard` → `remember` / `amend` を実行する。blockedなら止め、warnなら根拠を確認する。
-- **skip**: Priors の参照・書込が不要。推測で呼ばず、判断だけを監査ログへ残す。
+Priorsを使うかはタスクごとにAIが判断する。決定・経緯・制約が関係する場合に参照し、将来再利用する価値がある情報だけ保存する。固定の確認リスト、多段呼出し順序、トピック判定は設けない。実際に書き込む場合は `guard` とサーバー側制約に従い、blockedなら止め、warnなら根拠を確認する。使わない判断も有効で、自動Recallはありません。
 
-### 自発判断チェック（Claude / Codex 共通）
+基準は「後で役立つか」。AIが将来の再利用価値を認めた場合は`remember`や`working_cache_write`を選べるが、保存は必須ではない。未決定は型・不確実性・出所を付け、提案を決定にしない。要旨は「依頼／判断／未決定／再開情報」。
 
-明示依頼がなくても、応答前に次の三つを点検する。
+UserPromptSubmit hookは登録されず、入力の分類・送信・候補記録・利用の催促もしない。判断を監査記録に残したい場合は明示的に`hooks/record-decision.js`を使えるが、記録は任意。
 
-1. **Recall候補**: 既存の決定・仕様・制約・過去の作業・本番/rollbackの前提が判断に影響するか。
-2. **Remember候補**: 次の会話で役立つか（決定・手順・落とし穴・知見のほか、未決定の相談・比較案・仮説も）。
-3. **未解決候補**: 問い、保留、障害、残件、次の一手が残ったか。明示的に示された場合は会話終了前に `checkpoint` または問いの確認を実行する。
+会話終了時の追加Recallや保存は必須ではない。新たな有用情報があり未保存とAIが判断した場合にだけ必要な作業を行い、保存時は成功ID・版を確認する。結果を監査する場合は`record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <id@version,...>`を使う。
 
-該当時だけ `context_open` → `recall` → 必要なら `guard` → 書込または`checkpoint`を選ぶ。兆候だけでtoolを自動呼出ししたり、本文を自動保存・確定したりしない。`PRIORS_AUTO_RECALL=1` の高確度再開兆候では応答前にRecall。
-
-基準は「後で役立つか」。回答時に質問と応答を点検し、要望・検討・知見は`remember`、途中状態は`working_cache_write`へ自発保存する。未決定は型・不確実性・出所を付け、提案を決定にしない。要旨は「依頼／判断／未決定／再開情報」。Tier Aの修正記憶に変更・commit・検証・配備状態を残す。`PRIORS_AUTO_REMEMBER=0`だけ旧候補箱モード。
-候補種別ごとの次の確認: Recallは `context_open` → `recall`、Rememberは `guard` → `remember` / `amend`、未解決は `checkpoint`。未検出を不要の証明とみなさず点検する。
-
-UserPromptSubmitは毎回判定を促す。秘密疑い・検査不能は自動送信・hash・候補を省略し、通常入力はhashだけ記録。`hooks/record-decision.js --decision <判定> --client claude --phase turn-start|conversation-end`で監査する。本文・秘密は残さず、未検出は安全の証明ではない。
-
-終了前も判定し、保存時は `context_open` → `recall` → `guard` → `remember` / `amend` の成功ID・版を確認する。`record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <id@version,...>`で結果を記録し、未判定で終了しない。確認済みは`use-read`ならRecall候補だけ、`write-candidate`と`skip`なら候補全体。
-
-未実装・検証・再開条件は`work_item`へ。「残件」等では`brief`で同じ事象の明示IDを再利用し、曖昧な候補は提示して選択を待つ。実装・検証は`work_event`、完了は`resolve`、再発は`reopen`。未検証resolveや解決済み記憶の削除は禁止。
+明確な継続要望は今回の応答から適用する。`refs.continuing_request`への保存は、次回以降にも役立つとAIが判断した場合だけ行い、必須ではない。未実装・検証・再開条件は必要な場合に`work_item`へ。「残件」等では`brief`で同じ事象の明示IDを再利用し、曖昧な候補は提示して選択を待つ。実装・検証は`work_event`、完了は`resolve`、再発は`reopen`。未検証resolveや解決済み記憶の削除は禁止。
 
 ### 延期した対応・認証情報の露出
 - 該当時は同梱の [保存・再開手順](deferred-work.md) を読む。採用した未完了対応を会話の一覧だけに置かず、同じ事象のworkへ保存する。否定・引用・完了を区別する。
@@ -38,11 +25,11 @@ UserPromptSubmitは毎回判定を促す。秘密疑い・検査不能は自動�
 - 全対象の交換または不要理由、利用先更新と必要な検証が完了条件。自動失効・発行は禁止。既知IDはfull brief、曖昧なら自動選択しない。新事象はUUIDのidempotency_key、結果不明は同じキー・引数で再送する。
 カードは[共通手順](search-card-recovery.md)に従う。
 
-## 1. 最初に触れる時点で `context_open` を呼ぶ
+## 1. 選んだ機能に必要な入口を使う
 
-会話の先頭の下見（SessionStart フック）は**書込の代わりにならない**（主テーマの束縛もテーマ切替の確認もされない）。
+SessionStart は短い機能案内だけを表示し、設定・token・MCP・記憶を読み取らない。必要性と呼ぶ機能はAIが問いごとに判断する。
 
-- **その会話で Priors に最初に触れる時点で**（書込・`guard`・読取のいずれでも）自分で `context_open(theme)` を呼ぶ。以後は同じ応答の `resolved_session_id` を `session_id` に使い回す。
+- `context_open` は毎回の入口ではない。選んだ操作が `session_id` を必要とし、まだ有効なsessionが無い場合にテーマとsessionを確認する。Priorsを使わない会話では呼ばない。以後はその応答の `resolved_session_id` を再利用する。
 - テーマはサーバー instructions の `themes` から **prefix** で選ぶ（表示名で呼ばない）。似た prefix を手で作らない（`prefix_lookalike` で弾かれる）。目的のテーマが無ければ管理者にテーマ作成を依頼する。
 - 例: `context_open({ theme: "<prefix>" })`（`themes[].prefix` のいずれか）
 
@@ -62,13 +49,13 @@ UserPromptSubmitは毎回判定を促す。秘密疑い・検査不能は自動�
 - 長期記憶と参照を残した完了メモは`delete`。作業メモ成功は長期保存の証明ではない。失敗しても作業を続ける。
 - 転送は`scripts/asset-transfer.js publish|fetch|resume`。失敗は未完了。
 
-テーマ追加の可能性があれば `theme_list` で最新一覧を取る（一覧に無いだけで不存在としない）。
+テーマ一覧が選択判断に役立つ場合は `theme_list` で最新一覧を取る（一覧に無いだけで不存在としない）。
 
-## 記憶整理の自動実行
-利用者がテーマ全体を次世代snapshotへ整理するよう依頼したら、`context_open` → `recall` → `guard` の後に `theme_organize` を呼び、確認で止めず次世代snapshotまで自動実行する。先に `theme_list` を再取得し、その `theme_id` と `current_generation` を使う。`capture` に会話要約・記憶・タスク状態・世代の出所・actor・session・時刻・内容ハッシュを付ける。関係は整理メモに残す（検証済み化・元記憶の削除・自動撤回はしない）。同じ依頼は同じ `idempotency_key` で再送。`theme_id`・世代headが一覧に無ければ推測せず世代初期化が要ると報告。個別記憶の編集・撤回・分割・結合は`maintain`。
+## テーマ全体を整理する場合（任意の手順例）
+AIが利用者の依頼に対してテーマ全体の整理が有用だと判断した場合に限り、`theme_organize`を選択肢にできる。Priorsの利用やこの操作を自動で提案・実行する規則ではない。選んだ場合はツール契約に従い、対象テーマと世代を確認する。`capture`には確認できた内容と出所を付け、整理メモは元記憶を検証済みにしたり削除・撤回したりしない。同じ依頼の再送では同じ`idempotency_key`を使う。対象を確認できなければ推測せず報告する。個別記憶の編集・撤回・分割・結合を選ぶ場合は`maintain`を使える。
 
-## 3. 提案・実行の直前：`guard`
-提案・実行の直前に`consult`を呼び、問い、計画、必要なら行動fingerprintを渡す。`guard.verdict`が`blocked` / `warn`なら、まず`matched`の根拠を確認する。`indeterminate`は安全確認済みと扱わない。旧serverでは`guard`へ`plan_text`と`session_id`を渡す。nested guardを確認した`consult`はguard手順を満たす。
+## 3. 提案・実行での制約確認（必要な場合）
+否定済みの決定・制約・危険が現在の案に関係し、確認が役立つとAIが判断した場合は`consult`または`guard`を使える。`guard.verdict`が`blocked` / `warn`なら`matched`の根拠を確認し、`indeterminate`を安全確認済みと扱わない。ツールが`session_id`や計画文を要求する場合はその契約に従う。nested guardを確認した`consult`はguard手順を満たす。
 
 ## 3.1 まとめて残す・管理する
 - 複数の決定・結果を作業に結び付けて残すときは`capture`（すべて確定）。明示指示の参照は本人が示したものだけ。
@@ -98,14 +85,14 @@ UserPromptSubmitは毎回判定を促す。秘密疑い・検査不能は自動�
 
 ## 6. 終える：`checkpoint`
 
-作業の区切り・中断のたびに `checkpoint` を残す（`session_id` 必須）。次回の `context_open` で handoff 枠に出る。`phase` は enum から選ぶ。
+次の会話への引継ぎに役立つ場合は `checkpoint` を残す（`session_id` 必須）。毎回の区切りや中断で作る必要はない。次回の `context_open` で handoff 枠に出る。`phase` は enum から選ぶ。
 - `checkpoint` は既定で自分の最新 handoff を置き換える（並行作業中は `supersede_previous: false`）。回答済みの問い・引き継ぎ（`answered_by`）は所有者が `maintain` resolve で閉じる（`get` で辿れる・早すぎれば reopen）。完了を記録する記憶は `answers` 辺で元の handoff を指す。blocked 解除は次の記録に `status: in_progress`。
 
 ## 7. してはいけないこと
 
 - token・DB 接続文字列を会話・文書・記憶本文に出さない。環境変数や `.env*` の値を読んで確認する行動もしない。
 - Priors の tool 名を接頭辞つき（`mcp__…`）で記憶や文書に書かず、素の名前（`context_open` 等）にする。
-- SessionStart フックの下見の session 値は**書込に使わない**（書込用は自分の `context_open` の応答から）。
+- SessionStart は記憶を読まず、`session_id` は自分が呼んだ `context_open` の応答値を使う。
 - MCP 登録や利用者の Claude 設定を自分で書き換えない。
 
 ## 8. 困ったとき

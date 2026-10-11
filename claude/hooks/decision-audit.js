@@ -14,12 +14,6 @@ function auditPath(env = process.env) {
   return path.join(os.homedir(), '.priors', 'decision-audit.jsonl');
 }
 
-function stopDiagnosticPath(env = process.env) {
-  const configured = env.PRIORS_STOP_DIAGNOSTIC_FILE;
-  if (typeof configured === 'string' && configured.trim()) return path.resolve(configured);
-  return path.join(os.homedir(), '.priors', 'stop-hook.jsonl');
-}
-
 function hashPrompt(prompt) {
   return crypto.createHash('sha256').update(String(prompt || ''), 'utf8').digest('hex');
 }
@@ -92,21 +86,6 @@ function inputSafetyGuidance(counts) {
     : '';
 }
 
-function recordStopInvocation({ stopHookActive = false } = {}, env = process.env) {
-  const file = stopDiagnosticPath(env);
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const event = {
-    schema: 'priors.stop-hook-diagnostic.v1',
-    recorded_at: new Date().toISOString(),
-    event: 'stop_invoked',
-    client: 'claude',
-    stop_hook_active: stopHookActive === true,
-  };
-  fs.appendFileSync(file, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
-  try { fs.chmodSync(file, 0o600); } catch { /* Windows / ACLs: best effort */ }
-  return { file, event };
-}
-
 function lastAuditEvent(env = process.env) {
   const file = auditPath(env);
   try {
@@ -164,7 +143,7 @@ function observedSaves(sessionId, client, env = process.env) {
   return [...ids];
 }
 module.exports = { validSession, observedSaves,
-  DECISIONS, PHASES, auditPath, stopDiagnosticPath, hashPrompt,
-  recordDecision, recordStopInvocation, lastAuditEvent, auditHealth,
+  DECISIONS, PHASES, auditPath, hashPrompt,
+  recordDecision, lastAuditEvent, auditHealth,
   inputSafetySummary, inputSafetyGuidance,
 };

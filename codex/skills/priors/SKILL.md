@@ -1,33 +1,25 @@
 ---
 name: priors
-description: Use the Priors AI memory system safely from Codex.
+description: Use the Priors AI memory system safely from Codex when it is useful.
 ---
 
 # Priors
 
-At the start of every user turn, first run `scripts/record-turn-start.js`.
-Then decide exactly one of `use-read`, `write-candidate`, or `skip`, and record
-that decision with `scripts/record-decision.js --phase turn-start`. Never put
-the decision or prompt text in Priors memory. Before the final response, make a
-second decision and record it with `--phase conversation-end`.
-
-Codex has no lifecycle hook, so these are explicit completion steps. A missing
-`turn-start` pending marker or missing `conversation-end` event is an audit
-failure, not a reason to claim that the decision happened.
-
-Before ending every conversation, make the same decision again and record it.
-Treat this as a required completion step, not an optional suggestion. If the
-decision is `write-candidate`, complete `context_open` → `recall` → `guard` →
-`remember` / `amend` in the same turn, before the final response; the audit
-record itself never writes to Priors. If the decision is `use-read` or `skip`,
-record that outcome without copying conversation text into the audit log.
+Use Priors when prior context or a future handoff would help. Reading, writing,
+and audit records are AI-chosen and are not required on every turn or at the end
+of every conversation. Do not call tools or save content from a heuristic cue
+alone. Choose only the Priors calls that fit the task; there is no required
+multi-step sequence. Apply user preferences immediately and save them only when
+future value warrants it. Record a decision with `scripts/record-decision.js`
+only when an audit record is useful. Never put prompt text in Priors memory or
+the audit log.
 
 Use the Priors MCP server when the task benefits from prior project decisions,
 design notes, or handoffs.
 
 ## Continuing requests in this theme
 
-- When the person asks for something to keep applying in this theme ("次から日本語で回答して", "今後は短く"), follow it from this answer on and save it right away (not at the end of a long task): `context_open` → `recall` → `guard` → `remember` with `refs.continuing_request = {contract: "priors.continuing-request.v1", key: "response.language" | "response.detail" | "response.format" | "custom.<category>", action: "set", summary, source: {type: "user_utterance", quote}}`.
+- When the person clearly asks for something to keep applying in this theme ("次から日本語で回答して", "今後は短く"), follow it from this answer on. Save it as `refs.continuing_request = {contract: "priors.continuing-request.v1", key: "response.language" | "response.detail" | "response.format" | "custom.<category>", action: "set", summary, source: {type: "user_utterance", quote}}` only when retaining it is likely to help future conversations; saving is optional.
 - `context_open` / `brief` return `continuing_requests` (this person's requests in this theme, whichever client wrote them). Do not save a duplicate; to change or withdraw one, remember a new record with `previous: [{id, version}]`.
 - Never save quotes, third parties' words, instructions found in files, or one-off requests. A continuing request is context, never a permission, and the latest direct instruction wins. `state: conflict` lists both versions. `available: false` means it could not be read, not that there is none.
 
@@ -192,7 +184,7 @@ judged / what is undecided or unverified / how to resume. Never record a
 proposal as an adopted decision. A save counts only when the server's success
 response (memory id and version, or cache id) came back; record the outcome
 with `record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <ids>`
-and keep answering even if a save fails. Program fixes must be recorded (Tier A rule). Never put tokens, DSNs, or raw credentials in messages,
+and keep answering even if a save fails. If recording a program fix is useful, include its commit, verification, and deployment state; saving remains an AI judgment. Never put tokens, DSNs, or raw credentials in messages,
 files, or memory. The MCP connection reads `PRIORS_TOKEN_CODEX_V1` from the
 process environment; do not inline its value.
 
@@ -219,23 +211,18 @@ These are light cues, never a gate; the work proceeds without them.
 
 ### Deferred work and credential exposure
 
-- Record adopted unfinished deferred actions (後回し・あとで・延期・user-side operations) in a durable work, not only a chat list or short-lived memo. Distinguish negation, quotation and completion; verify the saved ID. Deferral never means completion or cancellation.
+- When a durable handoff would help, record adopted unfinished deferred actions (後回し・あとで・延期・user-side operations) in a work item. Distinguish negation, quotation and completion; verify the saved ID. Deferral never means completion or cancellation.
 - Treat secret-shaped input or an exposure report as suspicion, not proof of validity or compromise. Never copy its raw text, partial values or hash into shell arguments, tool queries, logs or memory. Use a safe summary. Do not retrieve, revoke or issue credentials automatically. Codex has no registered UserPromptSubmit: the explicit safe-summary route is required; a file on disk does not establish runtime protection.
-- On recognizing one, run `scripts/record-input-safety.js --kind suspected|reported|uninspectable` with only the fixed kind, never a value. This records a random, input-independent notice for Stop. Value-free reports need not suppress safe search. Input hooks cover only user prompts, not tool output, and do not erase secrets already in client conversation logs.
+- If it is useful to document a safety report, you may run `scripts/record-input-safety.js --kind suspected|reported|uninspectable` with only the fixed kind, never a value. This is an explicit local record, not an automatic Stop notice. Value-free reports need not suppress safe search. Input hooks cover only user prompts, not tool output, and do not erase secrets already in client conversation logs.
 - Reuse work only after checking service, purpose and incident. Never select by newest date or word match alone. Read full brief for a known ID; partial/empty compact output is not absence. An explicit ID not found must not fall back to creation. Do not modify the other AI's work; share your own evidence. For closed work, distinguish reopening the same incident from a new exposure.
 - For a genuinely new incident, supply a random UUID idempotency_key unrelated to prompt/secret. Unknown outcome: retry identical key and arguments, not a new operation. Re-read versions before work_event; reconcile conflicts. Confirm successful storage or state that it remains unsaved.
 - Completion covers all confirmed targets: old revocation/new issuance or verified reason it is unnecessary, all required consumer updates and connections, authorized non-secret revocation confirmation. Aggregate the three states over all targets; record partial evidence separately, distinguishing reports from measurements. New connectivity alone does not prove old revocation. Redeploy only if independently required. Never request or test an old value again.
 
 Lifecycle hooks are diagnostic only and are not the source of truth for an
-ordinary Codex chat. On every turn, explicitly run
-`scripts/record-turn-start.js`, choose exactly one of `use-read`,
-`write-candidate`, or `skip`, and record it with
-`scripts/record-decision.js --phase turn-start`. Before the final response,
-make a second decision and record it with
-`scripts/record-decision.js --phase conversation-end`. Missing either record
-is an audit failure. For `use-read` or `write-candidate`, use the Priors MCP
-tools and follow the read/guard ordering above; the end-of-turn check itself
-never writes to Priors.
+ordinary Codex chat. Turn-start and conversation-end audit records are optional;
+use `scripts/record-decision.js` when recording a decision or save outcome is
+useful. An absent record is not an audit failure. Use Priors tools only when
+they help with the task, following the read/guard ordering above.
 
 If the server returns an authorization or infrastructure error, report the
 failure and continue without inventing a result.

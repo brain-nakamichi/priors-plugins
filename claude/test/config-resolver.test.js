@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { resolveConfig, searchDirs } = require('../hooks/config-resolver.js');
-const { config } = require('../hooks/auto-recall.js');
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-config-test-'));
 test.after(() => {
   assert.ok(path.resolve(base).startsWith(path.resolve(os.tmpdir()) + path.sep));
@@ -84,8 +83,4 @@ test('no git explores only cwd plus three parents and excludes home and filesyst
   const dirs=searchDirs(child,x.home);assert.equal(dirs.length,4);assert.ok(!dirs.includes(x.home));
   assert.ok(dirs.every(d=>path.dirname(d)!==d));
   project(x.home,{theme:'GEN'});assert.equal(resolveConfig(child,x.options).kind,'none');
-});
-test('auto-recall uses the same user defaults and invalid-setting stop', () => {
-  const x=setup();const env={PRIORS_USER_CONFIG_FILE:x.userConfigFile};x.write({schema_version:1,default_theme:'TEST2'});
-  assert.equal(config(x.cwd,env).theme,'TEST2');project(x.cwd,'{');assert.equal(config(x.cwd,env),null);
 });

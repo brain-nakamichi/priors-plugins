@@ -3,7 +3,7 @@
   "version": "0.1.36",
   "private": true,
   "type": "commonjs",
-  "description": "Claude Code plugin: Priors SessionStart hook (下見のみ・書込なし)",
+  "description": "Claude Code plugin: optional Priors context access (SessionStart is read-free by default)",
   "engines": {
     "node": ">=18"
   },
