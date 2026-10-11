@@ -25,7 +25,7 @@ codex.cmd plugin list
 
 ## 配布版
 
-- Claude plugin: 0.1.36
+- Claude plugin: 0.1.37
 - Codex plugin: 0.1.40
 
 Priors サーバーへの接続先は `https://priors-brain9.vercel.app/mcp` です。

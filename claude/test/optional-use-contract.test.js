@@ -7,17 +7,14 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..');
 
-test('Claude and Codex do not register prompt-level automatic Priors behavior', () => {
-  for (const client of ['claude', 'codex']) {
-    const hooksDir = path.join(ROOT, client, 'hooks');
-    const promptHook = require(path.join(hooksDir, 'user-prompt-submit.js'));
-    const endHook = require(path.join(hooksDir, 'conversation-end.js'));
-    assert.ok(promptHook);
-    assert.ok(endHook);
-    const config = JSON.parse(fs.readFileSync(path.join(hooksDir, 'hooks.json'), 'utf8'));
-    assert.equal(Object.hasOwn(config.hooks, 'Stop'), false);
-    assert.equal(Object.hasOwn(config.hooks, 'UserPromptSubmit'), false);
-  }
+test('Claude offers per-turn optional prompts while Codex keeps model-directed discovery', () => {
+  const claude = JSON.parse(fs.readFileSync(path.join(ROOT, 'claude', 'hooks', 'hooks.json'), 'utf8'));
+  const codex = JSON.parse(fs.readFileSync(path.join(ROOT, 'codex', 'hooks', 'hooks.json'), 'utf8'));
+  assert.ok(Object.hasOwn(claude.hooks, 'UserPromptSubmit'));
+  assert.ok(Object.hasOwn(claude.hooks, 'Stop'));
+  assert.ok(Object.hasOwn(claude.hooks, 'PostToolUse'));
+  assert.equal(Object.hasOwn(codex.hooks, 'UserPromptSubmit'), false);
+  assert.equal(Object.hasOwn(codex.hooks, 'Stop'), false);
 });
 
 test('Codex documentation describes model-directed optional use without automatic Recall', () => {

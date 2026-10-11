@@ -29,7 +29,7 @@ function main() {
   try {
     const read = readHookInput(0, false); const ids = read.ok && savedRefs(read.input);
     if (!ids) return;
-    recordDecision({ decision: 'write-candidate', client: 'claude', source: 'hook', phase: 'tool-save', sessionId: read.input.session_id, save: { outcome: 'recorded', ids } });
+    recordDecision({ decision: 'write-candidate', client: 'claude', source: 'hook', invocationKind: 'client-hook', phase: 'tool-save', sessionId: read.input.session_id, save: { outcome: 'recorded', ids } });
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:'Priors: 保存IDを監査へ観測しました。終端判断は未実施です。終端CLIで --client claude --session-id ' + read.input.session_id + ' --phase conversation-end --decision write-candidate --save-result recorded を使うと、このターンの観測IDを利用できます。'}}));
   } catch { process.stdout.write(JSON.stringify({systemMessage:'Priors: 保存観測を記録できません。終端では従来どおりIDと版を明示してください。'})); }
 }

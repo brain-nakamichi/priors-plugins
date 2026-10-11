@@ -44,3 +44,26 @@ test('a record without --save-result stays as before (no save field)', () => {
   assert.equal(r.status, 0);
   assert.equal(r.events.at(-1).save, undefined);
 });
+
+test('GEN983: manual recorder declares explicit helper without changing source', () => {
+  const r = run(['--decision', 'skip', '--phase', 'conversation-end']);
+  assert.equal(r.events[0].source, 'explicit');
+  assert.equal(r.events[0].invocation_kind, 'explicit-helper');
+});
+test('GEN983: fixed hook declaration is optional and validated before writing', () => {
+  const { recordDecision } = require('../hooks/decision-audit.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-invocation-'));
+  const file = path.join(dir, 'audit.jsonl');
+  const env = { PRIORS_DECISION_AUDIT_FILE: file };
+  try {
+    const base = { decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook' };
+    const legacy = recordDecision(base, env).event;
+    assert.equal(Object.hasOwn(legacy, 'invocation_kind'), false);
+    const event = recordDecision({ ...base, invocationKind: 'client-hook' }, env).event;
+    assert.equal(event.source, 'hook');
+    assert.equal(event.invocation_kind, 'client-hook');
+    const before = fs.readFileSync(file, 'utf8');
+    assert.throws(() => recordDecision({ ...base, invocationKind: 'not-a-kind' }, env));
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

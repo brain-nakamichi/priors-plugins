@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { inspectSensitiveInput, hasDisclosureReport, MAX_PROMPT_BYTES, MAX_CANDIDATE_CHARS } = require('../hooks/sensitive-input.js');
 const { MAX_RAW_BYTES, readHookInput } = require('../hooks/bounded-input.js');
+const { main: autoRecall } = require('../hooks/auto-recall.js');
 const { proactiveSignals, proactiveGuidance, proactiveConfidence } = require('../hooks/user-prompt-submit.js');
 const ROOT = path.join(__dirname, '..');
 const DEV_CODEX = path.join(ROOT, '..', 'codex-plugins', 'priors');
@@ -119,21 +120,39 @@ test('bounded reader rejects malformed, missing, non-string and invalid UTF8', (
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('sensitive prompt hooks never spawn or write prompt, hash, candidate, or audit data', () => {
+test('standalone recall blocks before env, cwd, token/config and fetch access', async () => {
+  const saved = global.fetch;
+  let calls = 0;
+  global.fetch = () => { calls++; throw new Error('must not fetch'); };
+  const env = new Proxy({}, { get() { throw new Error('must not read environment'); } });
+  try {
+    for (const prompt of [...cases.map(x => x[1]), 'z'.repeat(MAX_PROMPT_BYTES + 1), undefined]) {
+      const input = { prompt, get cwd() { throw new Error('must not read config'); } };
+      const result = await autoRecall(input, env);
+      assert.equal(result.ok, false);
+      assert.ok(['input_suspected_sensitive', 'input_uninspectable'].includes(result.reason));
+    }
+    assert.equal(calls, 0);
+  } finally { global.fetch = saved; }
+});
+
+test('Claude prompt hook suppresses spawn, prompt/hash/candidate writes and raw errors', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-sensitive-hook-'));
   const preload = path.join(dir, 'preload.js');
   fs.writeFileSync(preload, "require('node:child_process').spawnSync = () => { require('node:fs').writeFileSync(process.env.SPAWN_MARKER, 'called'); throw new Error('synthetic-raw-error'); };\n");
   try {
-    for (const root of [ROOT, CODEX]) for (const remember of ['0', '1']) {
+    for (const remember of ['0', '1']) {
       const audit = path.join(dir, 'audit'); const candidate = path.join(dir, 'candidate'); const marker = path.join(dir, 'spawn');
       for (const file of [audit, candidate, marker]) fs.rmSync(file, { force: true });
       const prompt = '前回の仕様を再開する。 token=synthetic-sensitive-example';
       const hash = crypto.createHash('sha256').update(prompt).digest('hex');
-      const child = spawnSync(process.execPath, ['--require', preload, path.join(root, 'hooks', 'user-prompt-submit.js')], { input: JSON.stringify({ prompt }), encoding: 'utf8', env: { ...process.env, PRIORS_AUTO_RECALL: '1', PRIORS_AUTO_RECALL_LIVE: '1', PRIORS_AUTO_REMEMBER: remember, PRIORS_DECISION_AUDIT_FILE: audit, PRIORS_PROACTIVE_CANDIDATE_FILE: candidate, SPAWN_MARKER: marker } });
+      const child = spawnSync(process.execPath, ['--require', preload, path.join(ROOT, 'hooks', 'user-prompt-submit.js')], { input: JSON.stringify({ prompt }), encoding: 'utf8', env: { ...process.env, PRIORS_AUTO_RECALL: '1', PRIORS_AUTO_RECALL_LIVE: '1', PRIORS_AUTO_REMEMBER: remember, PRIORS_DECISION_AUDIT_FILE: audit, PRIORS_PROACTIVE_CANDIDATE_FILE: candidate, SPAWN_MARKER: marker } });
       assert.equal(child.status, 0);
-      assert.equal(fs.existsSync(audit), false);
+      assert.match(JSON.parse(child.stdout).hookSpecificOutput.additionalContext, /hash/);
+      const event = JSON.parse(fs.readFileSync(audit, 'utf8'));
+      assert.equal(event.decision, 'pending'); assert.equal(event.prompt_sha256, undefined);
       assert.equal(fs.existsSync(candidate), false); assert.equal(fs.existsSync(marker), false);
-      for (const text of [child.stdout, child.stderr]) {
+      for (const text of [child.stdout, child.stderr, fs.readFileSync(audit, 'utf8')]) {
         for (const value of [prompt, 'synthetic-sensitive-example', hash, 'synthetic-raw-error']) assert.ok(!text.includes(value));
       }
     }
@@ -147,26 +166,39 @@ test('missing detector/reader and CLI malformed input fail closed with fixed out
     const env = { ...process.env, PRIORS_AUTO_RECALL: '1', PRIORS_AUTO_RECALL_LIVE: '1', PRIORS_AUTO_REMEMBER: '0', PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit'), PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidate') };
     for (const fault of ['malformed', 'sensitive-input.js', 'bounded-input.js']) {
       if (fault !== 'malformed') fs.rmSync(path.join(dir, 'hooks', fault));
-      for (const name of ['user-prompt-submit.js']) {
+      for (const name of ['user-prompt-submit.js', 'auto-recall.js']) {
         const child = spawnSync(process.execPath, [path.join(dir, 'hooks', name)], { env, input: fault === 'malformed' ? '{bad' : '{"prompt":"前回の仕様を再開"}', encoding: 'utf8' });
         assert.equal(child.status, 0); assert.equal(child.stderr, '');
-        assert.equal(child.stdout, '');
+        const result = JSON.parse(child.stdout);
+        if (name === 'auto-recall.js') assert.deepEqual(result, { ok: false, reason: 'input_uninspectable' });
+        else {
+          assert.match(result.hookSpecificOutput.additionalContext, /検査できない|検査できないため/);
+          assert.match(result.systemMessage, /任意/);
+          assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /毎回|use-read \/ write-candidate \/ skip/);
+        }
       }
     }
     assert.equal(fs.existsSync(path.join(dir, 'candidate')), false);
-    assert.equal(fs.existsSync(path.join(dir, 'audit')), false);
+    assert.ok(!fs.readFileSync(path.join(dir, 'audit'), 'utf8').includes('prompt_sha256'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('prompt hook has no proactive topic classifier or signal-guidance API', () => {
-  const promptHook = require('../hooks/user-prompt-submit.js');
-  assert.equal(promptHook.proactiveSignals, undefined);
-  assert.equal(promptHook.proactiveGuidance, undefined);
+test('deferred cues use existing categories and shared guidance; hand alone is low', () => {
+  for (const prompt of ['対応は後回しにする', 'あとで交換する', '修正を延期します']) {
+    const signals = proactiveSignals(prompt);
+    assert.ok(signals.includes('unresolved-candidate')); assert.ok(signals.includes('work-item-candidate'));
+    assert.equal(proactiveConfidence(prompt, signals), 'high');
+    assert.match(proactiveGuidance(signals, prompt), /否定・引用・完了報告/);
+  }
+  const prompt = 'お手元に資料があります';
+  assert.equal(proactiveConfidence(prompt, proactiveSignals(prompt)), 'low');
+  for (const prompt of ['後回しにしないで対応する', '引用「あとで対応する」', '延期した対応は完了した']) {
+    assert.match(proactiveGuidance(proactiveSignals(prompt), prompt), /否定・引用・完了報告/);
+  }
 });
 
-test('Codex helper copies match; prompt event remains unregistered', () => {
+test('Claude helpers match their safe counterparts; Codex prompt hook remains a separate integration', () => {
   for (const name of ['sensitive-input.js', 'bounded-input.js']) assert.equal(fs.readFileSync(path.join(ROOT, 'hooks', name), 'utf8'), fs.readFileSync(path.join(CODEX, 'hooks', name), 'utf8'));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(CODEX, 'hooks', 'hooks.json'), 'utf8')).hooks.UserPromptSubmit, undefined);
   for (const root of [ROOT, CODEX]) {
     const skill = fs.readFileSync(path.join(root, 'skills', 'priors', 'SKILL.md'), 'utf8') + (root === ROOT ? fs.readFileSync(path.join(ROOT, 'skills', 'priors', 'deferred-work.md'), 'utf8') : '');
     assert.match(skill, /UUID/); assert.match(skill, /full brief/); assert.match(skill, /idempotency_key/);
@@ -190,24 +222,53 @@ test('value-free reports are work cues, not an automatic search veto', () => {
   assert.equal(inspectSensitiveInput('トークンを貼った token=synthetic-example').suppress_auto_recall, true);
 });
 
-test('safety summaries remain local data and silent end hooks do not surface or write notices', () => {
+test('safety notices remain value-free; Claude Stop surfaces the current notice', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-safe-notice-'));
   try {
-    for (const root of [ROOT, CODEX]) {
+    for (const [root, client] of [[ROOT, 'claude'], [CODEX, 'codex']]) {
       const audit = require(path.join(root, 'hooks', 'decision-audit.js'));
       const env = { ...process.env, PRIORS_AUTO_REMEMBER: '1', PRIORS_DECISION_AUDIT_FILE: path.join(dir, path.basename(root) + '-audit'), PRIORS_STOP_DIAGNOSTIC_FILE: path.join(dir, 'stop'), PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidate') };
-      const client = root === ROOT ? 'claude' : 'codex';
       const notice = audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook', inputSafety: 'suspected', promptHash: 'a'.repeat(64) }, env);
       assert.equal(notice.event.prompt_sha256, undefined);
       assert.match(notice.event.safety_notice_id, /^[0-9a-f-]{36}$/);
       audit.recordDecision({ decision: 'skip', client, phase: 'conversation-end' }, env);
       assert.equal(audit.inputSafetySummary(env).suspected, 1);
-      const stop = spawnSync(process.execPath, [path.join(root, 'hooks', 'conversation-end.js')], { env, input: '{}', encoding: 'utf8' });
-      assert.equal(stop.status, 0); assert.equal(stop.stdout, '');
-      assert.equal(fs.existsSync(env.PRIORS_STOP_DIAGNOSTIC_FILE), false);
+      if (client === 'claude') {
+        const stop = spawnSync(process.execPath, [path.join(root, 'hooks', 'conversation-end.js')], { env, input: '{}', encoding: 'utf8' });
+        assert.equal(stop.status, 0); assert.match(stop.stdout, /秘密疑い 1件/); assert.match(stop.stdout, /作業項目があるか/);
+      }
       audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook' }, env);
       assert.equal(audit.inputSafetySummary(env).suspected, 0);
     }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Codex lifecycle hooks remain unregistered; Claude owns prompt and end reminders', () => {
+  const codexHooks = require(path.join(CODEX, 'hooks', 'hooks.json')).hooks;
+  assert.equal(codexHooks.UserPromptSubmit, undefined);
+  assert.equal(codexHooks.Stop, undefined);
+  assert.equal(codexHooks.PostToolUse, undefined);
+  const claudeHooks = require(path.join(ROOT, 'hooks', 'hooks.json')).hooks;
+  assert.ok(claudeHooks.UserPromptSubmit);
+  assert.ok(claudeHooks.Stop);
+  assert.ok(claudeHooks.PostToolUse);
+});
+
+test('audit I/O failures never echo sensitive input; CLI oversize drains and emits fixed output', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-sensitive-io-'));
+  try {
+    const blocker = path.join(dir, 'blocker'); fs.writeFileSync(blocker, 'not a directory');
+    const env = { ...process.env, PRIORS_AUTO_RECALL: '1', PRIORS_AUTO_REMEMBER: '0', PRIORS_DECISION_AUDIT_FILE: path.join(blocker, 'audit'), PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidate') };
+    for (const input of [JSON.stringify({ prompt: 'token=synthetic-error-case' }), ' '.repeat(MAX_RAW_BYTES + 1)]) {
+      for (const name of ['user-prompt-submit.js', 'auto-recall.js']) {
+        const result = spawnSync(process.execPath, [path.join(ROOT, 'hooks', name)], { env, input, encoding: 'utf8' });
+        assert.equal(result.status, 0); assert.equal(result.error, undefined); assert.equal(result.stderr, '');
+        assert.ok(!result.stdout.includes('synthetic-error-case')); assert.ok(!result.stdout.includes(blocker));
+        const parsed = JSON.parse(result.stdout);
+        if (name === 'auto-recall.js') assert.equal(parsed.ok, false);
+      }
+    }
+    assert.equal(fs.existsSync(path.join(dir, 'candidate')), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

@@ -1,7 +1,7 @@
 {
   "name": "priors",
-  "version": "0.1.36",
-  "description": "Priors の記憶をセッション開始時に下見として読み込む（書込はしない）",
+  "version": "0.1.37",
+  "description": "必要に応じてAIが機能を選んで使う任意の記憶システム。起動時の記憶取得は明示設定時のみ",
   "author": {
     "name": "brain"
   }

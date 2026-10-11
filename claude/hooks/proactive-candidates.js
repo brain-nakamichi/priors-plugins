@@ -140,7 +140,7 @@ function materializeRememberCandidate(env = process.env) {
     confidence: source.some((event) => event.confidence === 'high') ? 'high' : 'low',
     confirmation_state: 'pending',
     requires_confirmation: true,
-    next_action: 'context_open → recall → guard → remember/amend',
+    next_action: 'Priorsを使う価値と必要な機能・順序はAIが判断する。保存する場合だけ出所と書込条件を確認し、使わない判断も有効',
   };
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const retained = [...existing, candidate].slice(-MAX_CANDIDATES);

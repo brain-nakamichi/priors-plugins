@@ -127,6 +127,9 @@ test('会話終了時に本文なしのRemember候補を一件へ集約する', 
     assert.equal(first.candidate.schema, 'priors.remember-candidate.v1');
     assert.equal(first.candidate.confirmation_state, 'pending');
     assert.equal(first.candidate.requires_confirmation, true);
+    assert.match(first.candidate.next_action, /必要な機能・順序はAIが判断する/);
+    assert.match(first.candidate.next_action, /使わない判断も有効/);
+    assert.doesNotMatch(first.candidate.next_action, /context_open.*recall.*guard.*remember/);
     assert.deepEqual(pendingRememberCandidates(env).map((item) => item.candidate_id), [first.candidate.candidate_id]);
     assert.equal(materializeRememberCandidate(env).duplicate, true);
     const stored = fs.readFileSync(file, 'utf8');

@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Priors marketplace",
-    "version": "0.1.36"
+    "version": "0.1.37"
   },
   "plugins": [
     {
       "name": "priors",
-      "description": "Priors の記憶をセッション開始時に下見として読み込む（書込はしない）",
-      "version": "0.1.36",
+      "description": "Priors の機能を必要に応じて選ぶ任意の記憶支援プラグイン。毎ターンの利用判断と成功保存のID監査に対応",
+      "version": "0.1.37",
       "author": {
         "name": "brain"
       },

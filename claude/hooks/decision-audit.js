@@ -14,6 +14,12 @@ function auditPath(env = process.env) {
   return path.join(os.homedir(), '.priors', 'decision-audit.jsonl');
 }
 
+function stopDiagnosticPath(env = process.env) {
+  const configured = env.PRIORS_STOP_DIAGNOSTIC_FILE;
+  if (typeof configured === 'string' && configured.trim()) return path.resolve(configured);
+  return path.join(os.homedir(), '.priors', 'stop-hook.jsonl');
+}
+
 function hashPrompt(prompt) {
   return crypto.createHash('sha256').update(String(prompt || ''), 'utf8').digest('hex');
 }
@@ -33,9 +39,10 @@ function normalizeSave(save) {
   return { outcome: save.outcome, ids };
 }
 
-function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown', save, inputSafety, sessionId }, env = process.env) {
+function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown', save, inputSafety, sessionId, invocationKind }, env = process.env) {
   if (!DECISIONS.has(decision)) throw new Error('invalid decision');
   if (!PHASES.has(phase)) throw new Error('invalid phase');
+  if (invocationKind !== undefined && !['explicit-helper', 'client-hook'].includes(invocationKind)) throw new Error('invalid invocation kind');
   const saveRecord = normalizeSave(save);
   const file = auditPath(env);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -46,6 +53,7 @@ function recordDecision({ decision, client, promptHash, source = 'explicit', pha
     client: typeof client === 'string' && client ? client : 'unknown',
     source,
     phase,
+    ...(invocationKind ? { invocation_kind: invocationKind } : {}),
     ...(validSession(sessionId) ? { session_id: sessionId } : {}),
     ...(['suspected', 'uninspectable', 'reported'].includes(inputSafety)
       ? { input_safety: inputSafety, safety_notice_id: crypto.randomUUID() } : {}),
@@ -84,6 +92,21 @@ function inputSafetyGuidance(counts) {
   return counts.suspected + counts.uninspectable + counts.reported > 0
     ? `認証情報対応の確認: このターンの秘密疑い ${counts.suspected}件、検査不能 ${counts.uninspectable}件、露出申告 ${counts.reported}件。値を含まない作業項目があるか確認してください。同じ事象は既存workを再利用し、不要なら理由を残す。件数はローカルの印であり漏えい・保存不足の証明ではありません。`
     : '';
+}
+
+function recordStopInvocation({ stopHookActive = false } = {}, env = process.env) {
+  const file = stopDiagnosticPath(env);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const event = {
+    schema: 'priors.stop-hook-diagnostic.v1',
+    recorded_at: new Date().toISOString(),
+    event: 'stop_invoked',
+    client: 'claude',
+    stop_hook_active: stopHookActive === true,
+  };
+  fs.appendFileSync(file, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch { /* Windows / ACLs: best effort */ }
+  return { file, event };
 }
 
 function lastAuditEvent(env = process.env) {
@@ -143,7 +166,7 @@ function observedSaves(sessionId, client, env = process.env) {
   return [...ids];
 }
 module.exports = { validSession, observedSaves,
-  DECISIONS, PHASES, auditPath, hashPrompt,
-  recordDecision, lastAuditEvent, auditHealth,
+  DECISIONS, PHASES, auditPath, stopDiagnosticPath, hashPrompt,
+  recordDecision, recordStopInvocation, lastAuditEvent, auditHealth,
   inputSafetySummary, inputSafetyGuidance,
 };

@@ -21,7 +21,7 @@ try {
   let savedIds = (arg('--saved') || '').split(',').map((x) => x.trim()).filter(Boolean);
   if (saveResult === 'recorded' && arg('--saved') === undefined && phase === 'conversation-end' && decision === 'write-candidate') savedIds = observedSaves(sessionId, client);
   const save = saveResult ? { outcome: saveResult, ids: savedIds } : undefined;
-  const { event } = recordDecision({ decision, client, promptHash, phase, save, sessionId });
+  const { event } = recordDecision({ decision, client, promptHash, phase, save, sessionId, invocationKind: 'explicit-helper' });
   const acknowledged = event.source === 'explicit' && event.phase === 'conversation-end'
     ? acknowledgeProactiveCandidates(event.decision)
     : 0;
