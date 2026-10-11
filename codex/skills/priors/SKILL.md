@@ -139,20 +139,19 @@ When a new theme may have been created after the MCP connection started, call
 the read-only `theme_list` tool to refresh the current visible theme list; do
 not infer that an omitted theme does not exist.
 
-## Automatic theme organization
+## Optional theme organization
 
-When the user asks to organize a whole theme into its next generation, use the
-automatic `theme_organize` MCP tool after the normal `context_open` → `recall`
-→ `guard` sequence. Do not stop at a preview or ask for a second confirmation:
-the tool commits the next generation automatically and is idempotent. First
-refresh with `theme_list`; use its `theme_id` and `current_generation`, and
-include provenance for the conversation summary, project memory, task state,
-and the current/prior Priors generations in `capture`. Supply parent/child and
-other semantic links as organization notes. They remain unverified, and source
-memories are never deleted or automatically retracted. If a theme has no
-`theme_id` or generation head, report that it needs generation bootstrap
-instead of guessing identifiers.
-Use `maintain` for an individual memory edit, retraction, split, or merge.
+If the user asks to organize a whole theme, the AI may decide whether the
+`theme_organize` tool is useful for that request. It is an optional operation,
+not a required Priors workflow, and it does not require a fixed
+`context_open` → `recall` → `guard` sequence. If chosen, first refresh with
+`theme_list` and use its `theme_id` and `current_generation`; follow the tool's
+authorization and provenance contract. The tool commits a generation directly
+and does not delete source memories or automatically retract them. Parent/child
+and other semantic links supplied as organization notes remain unverified. If
+the theme has no `theme_id` or generation head, do not guess identifiers.
+For an individual memory edit, retraction, split, or merge, `maintain` is an
+available alternative when the AI judges it appropriate.
 
 Before proposing a material change, read the relevant context with `context_open`
 and `consult`. A successful `consult` whose nested guard was checked satisfies
