@@ -1,7 +1,7 @@
 {
   "name": "priors",
-  "version": "0.1.40",
-  "description": "Priorsの記憶をCodexから参照・更新するプラグイン",
+  "version": "0.1.42",
+  "description": "重要情報を保持し、関連する過去情報をCodexから適時Recallするプラグイン",
   "author": {
     "name": "Priors"
   },
@@ -14,7 +14,7 @@
     "developerName": "Priors",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Use Priors for practical memory support. Resume with brief after explicit work selection; use consult for evidence, counterpoints, bounded relations, and guard; synchronize full or delta according to retained context."
+    "defaultPrompt": "Use Priors proactively: retain durable important information without waiting for an explicit save request, and retrieve relevant prior information before relying on it when current context is insufficient. Do not search every turn or use a fixed tool sequence; combine features as the task requires."
   },
   "mcpServers": "./.mcp.json"
 }
