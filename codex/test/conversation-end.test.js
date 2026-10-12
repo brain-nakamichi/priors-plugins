@@ -4,15 +4,19 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildStopOutput } = require('../hooks/conversation-end.js');
 
-test('first Stop pass asks for a retention and relevant Recall check without forcing a save', () => {
-  const output = buildStopOutput({ hook_event_name: 'Stop', last_assistant_message: 'ordinary response' });
-  assert.equal(output.decision, 'block');
-  assert.match(output.reason, /重要な利用者指示/);
-  assert.match(output.reason, /保存不要ならその判断で構いません/);
-  assert.match(output.reason, /必要な情報だけRecall/);
-  assert.doesNotMatch(JSON.stringify(output), /ordinary response/);
+test('Stop adds concise guidance without blocking or forcing another model turn', () => {
+  const output = buildStopOutput({ hook_event_name: 'Stop', last_assistant_message: 'private transcript text' });
+  assert.equal(typeof output.systemMessage, 'string');
+  assert.match(output.systemMessage, /明示依頼を待たず/);
+  assert.match(output.systemMessage, /Recall/);
+  assert.equal(Object.hasOwn(output, 'decision'), false);
+  assert.equal(Object.hasOwn(output, 'reason'), false);
+  assert.doesNotMatch(JSON.stringify(output), /private transcript text/);
 });
 
-test('Stop re-entry does not issue another continuation', () => {
-  assert.deepEqual(buildStopOutput({ hook_event_name: 'Stop', stop_hook_active: true }), { continue: true });
+test('Stop re-entry stays advisory and does not request a continuation', () => {
+  const output = buildStopOutput({ hook_event_name: 'Stop', stop_hook_active: true });
+  assert.equal(Object.hasOwn(output, 'decision'), false);
+  assert.equal(Object.hasOwn(output, 'continue'), false);
+  assert.equal(typeof output.systemMessage, 'string');
 });
