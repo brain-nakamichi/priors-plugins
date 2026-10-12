@@ -201,6 +201,7 @@ test('UserPromptSubmit presents Priors as optional and audit stores only a pendi
     assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
     assert.match(output.hookSpecificOutput.additionalContext, /毎ターン、現在の問いや作業にPriorsが役立つか一度確認する/);
     assert.match(output.hookSpecificOutput.additionalContext, /使わない判断も有効/);
+    assert.match(output.hookSpecificOutput.additionalContext, /下見や会話本文だけを根拠に書込を自動実行せず/);
     assert.match(output.hookSpecificOutput.additionalContext, /使うか・どの機能を選ぶかはAIの判断/);
     assert.match(output.systemMessage, /任意/);
     assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /毎回|必ず実行/);
@@ -215,6 +216,31 @@ test('UserPromptSubmit presents Priors as optional and audit stores only a pendi
     assert.equal(recorded.status, 0);
     assert.equal(JSON.parse(recorded.stdout).decision, 'use-read');
     assert.equal(JSON.parse(recorded.stdout).phase, 'turn-start');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('既定モードでは自律Remember案内を示し、候補ファイルを作らない', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-default-remember-test-'));
+  const candidates = path.join(dir, 'candidates.jsonl');
+  try {
+    const env = {
+      ...process.env,
+      PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit.jsonl'),
+      PRIORS_PROACTIVE_CANDIDATE_FILE: candidates,
+    };
+    delete env.PRIORS_AUTO_REMEMBER;
+    const child = spawnSync(process.execPath, [HOOK], {
+      env,
+      input: JSON.stringify({ prompt: '今回の方針を記録する', hook_event_name: 'UserPromptSubmit' }),
+      encoding: 'utf8',
+    });
+    assert.equal(child.status, 0);
+    const output = JSON.parse(child.stdout);
+    assert.match(output.hookSpecificOutput.additionalContext, /自律Rememberの案内は既定で有効/);
+    assert.match(output.hookSpecificOutput.additionalContext, /保存しない判断も有効/);
+    assert.equal(fs.existsSync(candidates), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -49,11 +49,11 @@ try {
   const workReady = pendingWorkItemCandidates().length;
   const checkpointReady = pendingCheckpointCandidates().length;
   process.stdout.write(JSON.stringify({
-    systemMessage: 'このターンの終わりに、Priorsが次の会話や作業に役立つかを確認してください。利用は任意で、使うか・保存するか・明示的な判定を記録するかはAIの判断です。何もしない判断も有効です。',
+    systemMessage: 'Priorsの自律Remember案内は既定で有効です。次の会話で役立つとAIが判断した場合だけ保存できます。Priorsを使わない・保存しない判断も有効です。',
     hookSpecificOutput: {
       hookEventName: 'Stop',
       additionalContext: [
-        '会話終了時に、このターンでPriorsが役立つかを一度確認する。実際に使うか・どの機能を組み合わせるかはAIが判断し、使わない判断も有効。固定手順はない。',
+        '会話終了時に、このターンでPriorsが役立つかを一度確認する。自律Rememberの案内は既定で有効だが、実際に使うか・保存するか・どの機能を組み合わせるかはAIが判断し、使わない・保存しない判断も有効。固定手順はない。',
         '保存を選んだ場合だけ成功応答の ID・版を確認する。利用・保存・明示的な判定記録をしない選択もできる。',
         '記憶は 1 主題 1 件で書く（GEN-711）: 配備報告・レビュー・残件対応のように複数の主題を 1 件にまとめると、どの主題の質問でも本文の要点が薄まり検索で見つからない（例: GEN-629 / GEN-661 型）。主題ごとに記憶を分け、配備や作業の記録は短い 1 件にして relates_to で束ねる。既にある記憶へ主題を足すときも同じ。',
         '検索カード（GEN-727）: remember / capture の各項目 / amend の訂正・置換・異議 / maintain の改訂と outputs には、priors_contract.features に search_card_fields があれば search_summary（問い・主張・条件・結論。例外・否定・重要な数値と名前・実測か推測かの区別を残し、本文にある主張だけ、600 字以内）と keywords（固有名詞・数値・版番号・略称・別名、24 件以内）を添える（カード付きは 1 要求 10 件まで）。応答の search_card.state が pending なら、その記憶は search_card ツールでカードを書くまで本文と題名だけで検索される。claim_not_in_body の任意 error.token（直接の search_card 拒否では details.token）は本文と照合してカードの主張を訂正する手がかり。旧サーバや他理由では token が無くてもよい。検査のため本文へ架空の主張を足さず、token をログ・共有メモへ転記しない。error 付きの pending は記憶は保存済みなので書込を再送せず、search_card（id・expected_version・必須の idempotency_key）で直したカードを書く。invalid_input（field が search_summary / keywords）のときは記憶も保存されていないので、カードを直すか外して同じ鍵で再送してよい。',

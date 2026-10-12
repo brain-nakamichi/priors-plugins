@@ -134,7 +134,7 @@ function main() {
     '毎ターン、現在の問いや作業にPriorsが役立つか一度確認する。実際に使うか・どの機能を選ぶかはAIの判断で、使わない判断も有効。',
     process.env.PRIORS_AUTO_REMEMBER === '0'
       ? '下見や会話本文だけを根拠に書込を自動実行せず、書込前の guard を省略しない。'
-      : '保存候補の手掛かり: 次の会話で役立つとAIが判断した場合だけ remember / amend か working_cache_write を選べる。未決定・仮説を保存する場合は型と不確実性・出所を付ける。保存時は成功応答の ID・版を確認する。',
+      : '自律Rememberの案内は既定で有効。次の会話で役立つとAIが判断した場合だけ remember / amend か working_cache_write を選べる。保存しない判断も有効。未決定・仮説を保存する場合は型と不確実性・出所を付ける。保存時は成功応答の ID・版を確認する。',
     signals.length > 0
       ? `自発候補（出所: local-heuristic、信頼度: ${confidence === 'high' ? '高' : '低'}、候補検出は本文を保存しない。自動Recallは別途の明示設定時のみ送信する）: ${signals.join(', ')}。これはヒントであり、要否はAIが現在の問いに応じて判断する。${proactiveGuidance(signals, prompt, process.env)}`
       : '自発候補（出所: local-heuristic、信頼度: 低）: 強い兆候は検出されなかった。これは未検出であり、必要性の判断を拘束しない。',
