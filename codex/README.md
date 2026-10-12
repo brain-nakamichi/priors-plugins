@@ -4,6 +4,6 @@ Priorsは毎ターン検索するものではなく、固定手順もありま�
 
 SessionStart で公式の Codex 用 `plugin.json` を読み取り専用で確認し、インストール版より新しい場合だけ更新を案内します。同じ版の通知は24時間に1回に抑制し、通信失敗時は通知しません。自動更新、token、MCP設定の変更は行いません。
 
-Stop は、保持基準に合う重要情報のRememberと、必要な場合のRecallを短く案内します。案内はCodexの警告として表示し、追加の応答や固定手順は要求しません。保存やRecallの実行をフックが代行することもありません。
+UserPromptSubmit は毎ターン開始時に、保持基準に合う重要情報のRememberと、必要な場合のRecallをモデルへ短く案内します。追加の応答や固定手順は要求せず、保存やRecallの実行をフックが代行することもありません。
 
 確認先は `PRIORS_PLUGIN_UPDATE_URL`、通知状態の保存先は `PRIORS_PLUGIN_UPDATE_STATE_FILE` で上書きできます。確認先は HTTPS かつ許可ホストのみ利用します。
