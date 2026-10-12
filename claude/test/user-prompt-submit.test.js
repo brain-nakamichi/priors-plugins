@@ -187,7 +187,7 @@ const ROOT = path.join(__dirname, '..');
 const HOOK = path.join(ROOT, 'hooks', 'user-prompt-submit.js');
 const RECORDER = path.join(ROOT, 'hooks', 'record-decision.js');
 
-test('UserPromptSubmit presents Priors as optional and audit stores only a pending hash', () => {
+test('UserPromptSubmit gives retention and Recall guidance; audit stores only a pending hash', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-decision-test-'));
   const file = path.join(dir, 'audit.jsonl');
   try {
@@ -199,12 +199,12 @@ test('UserPromptSubmit presents Priors as optional and audit stores only a pendi
     assert.equal(child.status, 0);
     const output = JSON.parse(child.stdout);
     assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
-    assert.match(output.hookSpecificOutput.additionalContext, /毎ターン、現在の問いや作業にPriorsが役立つか一度確認する/);
-    assert.match(output.hookSpecificOutput.additionalContext, /使わない判断も有効/);
+    assert.match(output.hookSpecificOutput.additionalContext, /毎ターン、Recall条件と保持基準を確認する/);
+    assert.match(output.hookSpecificOutput.additionalContext, /保持基準に合う重要情報は明示依頼を待たず/);
     assert.match(output.hookSpecificOutput.additionalContext, /下見や会話本文だけを根拠に書込を自動実行せず/);
-    assert.match(output.hookSpecificOutput.additionalContext, /使うか・どの機能を選ぶかはAIの判断/);
-    assert.match(output.systemMessage, /任意/);
-    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /毎回|必ず実行/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Recall条件と保持基準を確認/);
+    assert.match(output.systemMessage, /Recall条件/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /一律に検索する|毎回recallする/);
     const line = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(line.decision, 'pending');
     assert.equal(line.source, 'hook');
@@ -238,8 +238,8 @@ test('既定モードでは自律Remember案内を示し、候補ファイルを
     });
     assert.equal(child.status, 0);
     const output = JSON.parse(child.stdout);
-    assert.match(output.hookSpecificOutput.additionalContext, /自律Rememberの案内は既定で有効/);
-    assert.match(output.hookSpecificOutput.additionalContext, /保存しない判断も有効/);
+    assert.match(output.hookSpecificOutput.additionalContext, /保持基準に合う重要情報は明示依頼を待たず/);
+    assert.match(output.hookSpecificOutput.additionalContext, /最新文脈に不足する場合は依存前に対象を絞って取得/);
     assert.equal(fs.existsSync(candidates), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -263,13 +263,13 @@ test('自発候補の兆候だけを返し、入力本文を出力・保存し�
     assert.match(outputText, /work-item-candidate/);
     assert.match(outputText, /出所: local-heuristic/);
     assert.match(outputText, /信頼度: 高/);
-    assert.match(outputText, /将来役立つと判断した場合は、必要な出所を確認して保存を選べる/);
-    assert.match(outputText, /既存文脈が役立つと判断した場合は必要な読取機能を選ぶ/);
+    assert.match(outputText, /保持基準に合う重要情報なら明示依頼を待たず出所を確認して保存する/);
+    assert.match(outputText, /過去情報が今回の回答や重要操作を左右し、最新文脈に不足する場合は依存前に対象を絞って取得する/);
     assert.match(outputText, /Recall候補の兆候/);
     assert.match(outputText, /Remember候補の兆候/);
     assert.match(outputText, /未解決候補の兆候/);
     assert.match(outputText, /作業台帳候補の兆候/);
-    assert.match(outputText, /書込時はguardを満たす/);
+    assert.match(outputText, /書込時はguardと認可を満たす/);
     assert.match(outputText, /checkpoint/);
     assert.doesNotMatch(outputText, new RegExp(secret));
     assert.doesNotMatch(fs.readFileSync(file, 'utf8'), new RegExp(secret));
@@ -342,7 +342,7 @@ test('兆候未検出でも低信頼のローカル判定として表示する',
     assert.equal(child.status, 0);
     assert.match(child.stdout, /出所: local-heuristic/);
     assert.match(child.stdout, /信頼度: 低/);
-    assert.match(child.stdout, /これは未検出であり、必要性の判断を拘束しない/);
+    assert.match(child.stdout, /未検出は不要の証明ではない/);
     assert.doesNotMatch(child.stdout, /recall-likely|remember-candidate|unresolved-candidate/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

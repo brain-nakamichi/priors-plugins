@@ -11,7 +11,7 @@ const ROOT = path.join(__dirname, '..');
 const HOOK = path.join(ROOT, 'hooks', 'conversation-end.js');
 const RECORDER = path.join(ROOT, 'hooks', 'record-decision.js');
 
-test('conversation end prompts for a per-turn usefulness check but leaves use and explicit decision logging optional', () => {
+test('conversation end reminds the model to retain important information and retrieve relevant history', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-end-test-'));
   const file = path.join(dir, 'audit.jsonl');
   const stopFile = path.join(dir, 'stop-hook.jsonl');
@@ -30,22 +30,22 @@ test('conversation end prompts for a per-turn usefulness check but leaves use an
     assert.equal(child.status, 0);
     const output = JSON.parse(child.stdout);
     assert.equal(output.hookSpecificOutput.hookEventName, 'Stop');
-    assert.match(output.hookSpecificOutput.additionalContext, /候補ヒント（採用は任意）/);
+    assert.match(output.hookSpecificOutput.additionalContext, /会話終了時に、保持基準に合う未保存情報がないか確認する/);
     assert.match(output.hookSpecificOutput.additionalContext, /高確度/);
-    assert.match(output.hookSpecificOutput.additionalContext, /候補ヒント（採用は任意）/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Remember候補は手掛かりとして扱い、保持基準に合う重要情報は出所を確認して保存する/);
     assert.match(output.hookSpecificOutput.additionalContext, /自動候補キューが 1 件/);
     assert.match(output.hookSpecificOutput.additionalContext, /会話終了Remember候補を 1 件生成しました/);
     assert.match(output.hookSpecificOutput.additionalContext, /作業台帳候補を 1 件生成しました/);
     assert.match(output.hookSpecificOutput.additionalContext, /Recall候補 1 件/);
     assert.match(output.hookSpecificOutput.additionalContext, /Remember候補 1 件/);
-    assert.match(output.hookSpecificOutput.additionalContext, /Recall候補は、現在の問いに役立つと判断した場合だけ必要な読取機能を選べる（固定順序なし）/);
-    assert.match(output.hookSpecificOutput.additionalContext, /Remember候補は、将来役立つと判断した場合だけ/);
+    assert.match(output.hookSpecificOutput.additionalContext, /過去情報が今回を左右して最新文脈に不足する場合は、回答や重要操作の前に必要なものだけ取得する/);
+    assert.match(output.hookSpecificOutput.additionalContext, /重要な訂正は、明示依頼なしで通常の認可された Remember で保存する/);
     assert.match(output.hookSpecificOutput.additionalContext, /作業台帳候補は、継続管理が役立つ場合だけ/);
-    assert.match(output.systemMessage, /自律Remember案内は既定で有効/);
-    assert.match(output.systemMessage, /Priorsを使わない・保存しない判断も有効/);
-    assert.match(output.hookSpecificOutput.additionalContext, /会話終了時に、このターンでPriorsが役立つかを一度確認する/);
-    assert.match(output.hookSpecificOutput.additionalContext, /使わない・保存しない判断も有効/);
-    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /（必須）|必ず/);
+    assert.match(output.systemMessage, /Recall条件/);
+    assert.match(output.hookSpecificOutput.additionalContext, /保持基準に合う未保存情報がないか確認する/);
+    assert.match(output.hookSpecificOutput.additionalContext, /過去情報が今回を左右して最新文脈に不足する場合/);
+    assert.match(output.hookSpecificOutput.additionalContext, /保存成功応答の ID・版を確認する/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /（必須）|毎ターン検索する/);
     assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /a{64}/);
     assert.match(output.hookSpecificOutput.additionalContext, /\n/);
     assert.equal(fs.existsSync(file), false);
@@ -82,7 +82,7 @@ test('conversation end prompts for a per-turn usefulness check but leaves use an
     const repeated = spawnSync(process.execPath, [HOOK], { env, input: '{}', encoding: 'utf8' });
     assert.equal(repeated.status, 0);
     assert.notEqual(repeated.stdout, '');
-    assert.match(JSON.parse(repeated.stdout).hookSpecificOutput.additionalContext, /使わない・保存しない判断も有効/);
+    assert.match(JSON.parse(repeated.stdout).hookSpecificOutput.additionalContext, /成功応答の ID・版を確認する/);
 
     const reentrant = spawnSync(process.execPath, [HOOK], { env, input: JSON.stringify({ stop_hook_active: true }), encoding: 'utf8' });
     assert.equal(reentrant.status, 0);
@@ -95,7 +95,7 @@ test('conversation end prompts for a per-turn usefulness check but leaves use an
   }
 });
 
-test('既定設定でもPriors利用を強制せず、会話本文を保存しない', () => {
+test('既定設定では保持基準とRecall条件を案内し、会話本文を保存しない', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-auto-remember-end-'));
   const file = path.join(dir, 'candidates.jsonl');
   try {
@@ -108,8 +108,10 @@ test('既定設定でもPriors利用を強制せず、会話本文を保存し�
     });
     assert.equal(child.status, 0);
     const output = JSON.parse(child.stdout);
-    assert.match(output.systemMessage, /自律Remember案内は既定で有効/);
-    assert.match(output.hookSpecificOutput.additionalContext, /固定手順はない/);
+    assert.match(output.systemMessage, /保持基準に合う重要情報は明示依頼を待たず/);
+    assert.match(output.hookSpecificOutput.additionalContext, /明示依頼なしで通常の認可された Remember/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Recall trigger/);
+    assert.match(output.hookSpecificOutput.additionalContext, /全ターン検索や固定手順は使わない/);
     assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /（必須）|必ず/);
     assert.equal(fs.existsSync(file), false);
   } finally {

@@ -173,7 +173,7 @@ test('missing detector/reader and CLI malformed input fail closed with fixed out
         if (name === 'auto-recall.js') assert.deepEqual(result, { ok: false, reason: 'input_uninspectable' });
         else {
           assert.match(result.hookSpecificOutput.additionalContext, /検査できない|検査できないため/);
-          assert.match(result.systemMessage, /任意/);
+          assert.match(result.systemMessage, /保持基準|重要情報/);
           assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /毎回|use-read \/ write-candidate \/ skip/);
         }
       }

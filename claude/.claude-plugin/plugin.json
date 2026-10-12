@@ -1,7 +1,7 @@
 {
   "name": "priors",
-  "version": "0.1.38",
-  "description": "必要に応じてAIが機能を選んで使う任意の記憶システム。起動時の記憶取得は明示設定時のみ",
+  "version": "0.1.39",
+  "description": "重要情報を保持し、関連する過去情報を適時Recallする記憶システム",
   "author": {
     "name": "brain"
   }

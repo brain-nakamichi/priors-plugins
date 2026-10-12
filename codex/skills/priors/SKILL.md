@@ -5,14 +5,35 @@ description: Use the Priors AI memory system safely from Codex when it is useful
 
 # Priors
 
-Use Priors when prior context or a future handoff would help. Reading, writing,
-and audit records are AI-chosen and are not required on every turn or at the end
-of every conversation. Do not call tools or save content from a heuristic cue
-alone. Choose only the Priors calls that fit the task; there is no required
-multi-step sequence. Apply user preferences immediately and save them only when
-future value warrants it. Record a decision with `scripts/record-decision.js`
-only when an audit record is useful. Never put prompt text in Priors memory or
-the audit log.
+Use Priors according to the triggers below; there is no all-turn search or
+fixed tool sequence. When durable important information meets the retention
+criteria, save it before completing the answer without waiting for an explicit
+“remember” request. When relevant prior information may materially affect an
+answer or important action and is missing from current context, retrieve the
+narrowest useful scope before relying on it. Unrelated facts and temporary
+discussion do not need to be saved or searched. Heuristic cues are not proof of
+coverage and do not by themselves confirm facts. Never put prompt text in Priors
+memory or the audit log.
+
+### Important retention and timely recall
+
+- Retain durable user instructions/preferences, important decisions and
+  constraints (including rejected alternatives), unresolved commitments,
+  significant operational/safety/recovery results, and material corrections
+  or new evidence. Keep source, uncertainty, and decision/proposal status.
+- Do not retain ordinary facts, transient topics, secrets, or information the
+  user has forbidden from being saved.
+- Recall before depending on prior decisions/specifications, during a resume or
+  handoff, when an old mistake/rejected approach could recur, for history
+  questions, or when missing context could change an important answer/action.
+  If current conversation context already contains the needed information,
+  avoid duplicate retrieval. Do not search every turn or the whole theme.
+- Select and combine `context_open`, `recall`/`consult`, `get`, `timeline`,
+  `expand`, or other tools based on the task; there is no A→B→C topic-switch
+  detector or mandated workflow.
+- A hook cue, local candidate, or audit line is not proof of a successful read
+  or write. Report a save only after the success response returns the memory ID
+  and version. Treat denial, failure, timeout, or unknown outcome as unverified.
 
 Use the Priors MCP server when the task benefits from prior project decisions,
 design notes, or handoffs.
@@ -170,22 +191,20 @@ the author can `withdraw` a relation. Rebut another AI's relation with a memory
 carrying `refs.relation_id`. Do not mark it verified and do not retract source
 material automatically.
 
-Write to Priors on your own judgement (autonomous remember). The test is
-"will this help in the next conversation?", not "is it settled?". When an
-answer is ready, review the user's question or request together with your
-answer; if remembering it helps later, save it without waiting for "remember
-this" — undecided consultations, comparisons and hypotheses included (typed
-`hypothesis` / `working`, with uncertainty and source). Lasting requests,
-design deliberations and lessons go to `remember`; in-progress state and the
-next thing to check go to `working_cache_write`; greetings and repeats can be
-skipped. Keep the summary short: what the user asked / what you proposed or
-judged / what is undecided or unverified / how to resume. Never record a
-proposal as an adopted decision. A save counts only when the server's success
-response (memory id and version, or cache id) came back; record the outcome
-with `record-decision.js --phase conversation-end --save-result recorded|failed|not_needed --saved <ids>`
-and keep answering even if a save fails. If recording a program fix is useful, include its commit, verification, and deployment state; saving remains an AI judgment. Never put tokens, DSNs, or raw credentials in messages,
-files, or memory. The MCP connection reads `PRIORS_TOKEN_CODEX_V1` from the
-process environment; do not inline its value.
+Remember durable user instructions, important decisions and constraints,
+rejected approaches, unresolved commitments, significant operational results,
+and material corrections without waiting for "remember this". Undecided
+consultations, comparisons and hypotheses can also be retained when materially
+important, typed as `hypothesis` / `working` with their uncertainty and source.
+Use `remember` for durable items, `working_cache_write` for short-lived work
+state, and `checkpoint` for unresolved handoff state. Ordinary facts,
+transient discussion, greetings, repeats, secrets, and forbidden content are
+not retention targets. Keep the summary short and never present a proposal as
+an adopted decision. A save counts only when the server's success response
+(memory id and version, or cache id) came back. Keep answering if a save fails
+and state that it remains unconfirmed. Never put tokens, DSNs, or raw
+credentials in messages, files, or memory. The MCP connection reads
+`PRIORS_TOKEN_CODEX_V1` from the process environment; do not inline its value.
 
 ## Working cache for short-lived work state
 

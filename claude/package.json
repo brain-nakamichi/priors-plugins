@@ -1,9 +1,9 @@
 {
   "name": "priors-plugin",
-  "version": "0.1.38",
+  "version": "0.1.39",
   "private": true,
   "type": "commonjs",
-  "description": "Claude Code plugin: discover optional Priors MCP capabilities",
+  "description": "Claude Code plugin: retain important information and recall relevant history",
   "engines": {
     "node": ">=18"
   },
