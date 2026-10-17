@@ -6,8 +6,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { embeddedPayload, main: autoRecall, config: autoRecallConfig, formatAutoRecall, validUrl, MAX_QUERY_CHARS } = require('../hooks/auto-recall.js');
+const { recordTurnCandidate } = require('../hooks/user-prompt-submit.js');
 process.env.PRIORS_AUTO_REMEMBER = '0';
 
 // 回帰テストは本番MCPへ接続しない。実運用のopt-in自動Recallは既定で有効。
@@ -221,7 +223,7 @@ test('UserPromptSubmit gives retention and Recall guidance; audit stores only a 
   }
 });
 
-test('既定モードでは自律Remember案内を示し、候補ファイルを作らない', () => {
+test('既定モードでは自律Remember案内を示し、候補は本文なしで記録する', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-default-remember-test-'));
   const candidates = path.join(dir, 'candidates.jsonl');
   try {
@@ -240,7 +242,24 @@ test('既定モードでは自律Remember案内を示し、候補ファイルを
     const output = JSON.parse(child.stdout);
     assert.match(output.hookSpecificOutput.additionalContext, /保持基準に合う重要情報は明示依頼を待たず/);
     assert.match(output.hookSpecificOutput.additionalContext, /最新文脈に不足する場合は依存前に対象を絞って取得/);
-    assert.equal(fs.existsSync(candidates), false);
+    // 既定でも候補は本文なしで記録し、成功した保存の candidate_id で解決する（D8）。
+    assert.ok(fs.existsSync(candidates), 'default mode records a body-free candidate');
+    assert.ok(!fs.readFileSync(candidates, 'utf8').includes('今回の方針を記録する'));
+    assert.ok(!child.stdout.includes('今回の方針を記録する'));
+    assert.match(output.hookSpecificOutput.additionalContext, /保存候補IDは pc-[0-9a-f]+-/);
+    // 保存不要と判断したターンを閉じる手段が案内に残っていること（無いと Stop が毎ターン案内し続ける）
+    const command = output.hookSpecificOutput.additionalContext.match(/node "([^"]+record-decision\.js)" --decision skip --phase conversation-end --turn-id ([0-9a-f-]{36})/);
+    assert.ok(command, 'hint names the skip CLI with an absolute quoted path');
+    assert.ok(path.isAbsolute(command[1]));
+    // モデルは利用者のプロジェクトで実行するので、別の cwd から動くことを確かめる
+    const skip = spawnSync(process.execPath, [command[1], '--decision', 'skip', '--phase', 'conversation-end', '--turn-id', command[2]], { env, cwd: os.tmpdir(), encoding: 'utf8' });
+    assert.equal(skip.status, 0, skip.stderr);
+    assert.match(skip.stdout, /"acknowledged_candidates":1/);
+    const stop = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'conversation-end.js')], {
+      env: { ...env, PRIORS_STOP_DIAGNOSTIC_FILE: path.join(dir, 'stop.jsonl') }, input: '{}', encoding: 'utf8',
+    });
+    assert.equal(stop.status, 0);
+    assert.equal(stop.stdout, '', 'Stop is silent once the only candidate was skipped');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -373,18 +392,18 @@ test('代表的な自発候補入力の期待ラベルを回帰評価する', ()
   }
 });
 
-test('自動候補キューは同一候補を重複登録せず直近100件に制限する', () => {
+test('同一turnの候補を重複登録せず、候補キューを直近100件に制限する', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-proactive-retention-'));
   const file = path.join(dir, 'audit.jsonl');
   const candidates = path.join(dir, 'candidates.jsonl');
   try {
     const env = { ...process.env, PRIORS_DECISION_AUDIT_FILE: file, PRIORS_PROACTIVE_CANDIDATE_FILE: candidates };
     const prompt = '決定した方針を今後も使う';
-    const run = () => spawnSync(process.execPath, [HOOK], {
-      env, input: JSON.stringify({ prompt, hook_event_name: 'UserPromptSubmit' }), encoding: 'utf8',
-    });
-    assert.equal(run().status, 0);
-    assert.equal(run().status, 0);
+    const promptHash = crypto.createHash('sha256').update(prompt).digest('hex');
+    const turnId = '00000000-0000-4000-8000-000000000001';
+    const signals = ['remember-candidate', 'continuing-request-candidate'];
+    assert.ok(recordTurnCandidate(promptHash, signals, 'high', turnId, env).event);
+    assert.equal(recordTurnCandidate(promptHash, signals, 'high', turnId, env).duplicate, true);
     let lines = fs.readFileSync(candidates, 'utf8').trim().split(/\r?\n/);
     assert.equal(lines.length, 1);
     for (let i = 0; i < 105; i += 1) {

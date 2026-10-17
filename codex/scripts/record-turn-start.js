@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Codex has no lifecycle hook. This explicit first-step helper creates a
-// pending marker without persisting the prompt, token, or conversation text.
+// This explicit helper creates a pending marker without claiming that a native
+// lifecycle hook ran or persisting the prompt, token, or conversation text.
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -12,6 +12,6 @@ const result = spawnSync(process.execPath, [
   '--decision', 'pending',
   '--client', 'codex',
   '--phase', 'turn-start',
-  '--source', 'hook',
+  '--source', 'explicit',
 ], { stdio: 'inherit' });
 process.exitCode = result.status ?? 2;

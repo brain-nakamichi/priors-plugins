@@ -55,7 +55,40 @@ function scan(text, found) {
 
 function hasDisclosureReport(prompt) {
   if (typeof prompt !== 'string' || Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) return false;
-  return /(?:トークン|キー|パスワード|認証情報)[^\n]{0,64}(?:貼った|貼ってしまった|漏えい|漏洩|露出)|(?:貼った|貼ってしまった|漏えい|漏洩|露出)[^\n]{0,64}(?:トークン|キー|パスワード|認証情報)/u.test(prompt);
+  // A report must describe the speaker's own completed event. Quoted examples,
+  // third-party reports, and hypothetical scenarios are not incident reports.
+  const unquoted = prompt
+    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/gu, ' ')
+    .replace(/`[^`\n]*`/gu, ' ')
+    .replace(/(?:「[^」]*」|『[^』]*』|“[^”]*”|"[^"\n]*"|'[^'\n]*')/gu, ' ')
+    .replace(/^\s*>[^\n]*$/gmu, ' ');
+  const self = '(?:私|わたし|わたくし|自分|僕|ぼく|俺|おれ|I)';
+  const credential = '(?:トークン|キー|パスワード|認証情報|秘密情報|API[ _-]?(?:key|キー)|token|password|credential|secret)';
+  const exposure = '(?:貼ってしま(?:い)?ました|貼ってしまった|貼りました|貼った|送ってしま(?:い)?ました|送ってしまった|送信してしま(?:い)?ました|送信してしまった|共有してしま(?:い)?ました|共有してしまった|公開してしま(?:い)?ました|公開してしまった|漏えい(?:し)?ました|漏えいした|漏洩(?:し)?ました|漏洩した|漏れました|漏れた|流出しました|流出した|誤って入力しました|入力してしま(?:い)?ました|入力してしまった|コミットしてしま(?:い)?ました|コミットしてしまった|commit(?:ted)?|pasted|posted|shared|sent|leaked|exposed|committed|entered)';
+  const uncertain = /(?:可能性|かもしれ|かも|おそらく|たぶん|疑い|かは不明|かどうか不明|不明|と思う|と思います|\b(?:I think|I believe|maybe|possibly|might|may|could)\b)/iu;
+  const negatedExposure = /(?:わけではない|ことはない|していない|していません|してなかった|ません(?:でした)?|なかった|\b(?:not|never|no|didn't|did not|haven't|have not|hasn't|has not)\b)/iu;
+  const hypothetical = /(?:もし|もしも|仮に|仮定|たら|れば|場合|としたら|\bif\b|\bwould\b|\bcould\b|\bmight\b)/iu;
+  const thirdPartyAttribution = /(?:\b[A-Z][A-Za-z0-9_-]*\s+(?:said|reported|wrote|claimed|mentioned|told\s+me)\b|\b[A-Z][A-Za-z0-9_-]*によると|(?:別の利用者|他の利用者|第三者|Claude|Codex|[A-Z][A-Za-z0-9_-]*)(?:さん)?\s*(?:が|は)[^。！？!?]{0,160}(?:と報告|と述べ|と言った|と書いた))/iu;
+  const credentialPattern = new RegExp(credential, 'iu');
+  const exposurePattern = new RegExp(exposure, 'iu');
+  const jpEvent = `(?:${credential}[^。！？!?、，,;；]{0,16}${exposure}|${exposure}[^。！？!?、，,;；]{0,16}${credential})`;
+  const jpActor = new RegExp(`${self}(?:自身)?\\s*(?:が|は)\\s*(?:(?:昨日|先ほど|さきほど|さっき|今朝|先日|誤って|間違えて|うっかり)\\s*){0,2}${jpEvent}`, 'iu');
+  const jpPossessive = new RegExp(`${self}(?:自身)?\\s*の\\s*${credential}\\s*(?:を|が)[^。！？!?、，,;；]{0,16}${exposure}`, 'iu');
+  const englishActor = new RegExp(`\\bI\\s+(?:(?:accidentally|mistakenly)\\s+)?${exposure}\\b[^。！？!?]{0,80}${credential}`, 'iu');
+  const englishAuxiliaryActor = new RegExp(`\\bI\\s+(?:(?:have|has)\\s+)?(?:(?:just|accidentally|mistakenly)\\s+)*${exposure}\\b[^。！？!?]{0,80}${credential}`, 'iu');
+  const englishPossessive = new RegExp(`\\bmy\\s+${credential}[^。！？!?]{0,80}${exposure}\\b`, 'iu');
+  const utterances = unquoted.split(/[\n。！？!?]+/u);
+  return utterances.some((utterance) => {
+    if (uncertain.test(utterance) || thirdPartyAttribution.test(utterance)) return false;
+    const clauses = utterance.split(/(?:\b(?:and|but|so)\b|ので|から)/iu);
+    return clauses.some((clause) => {
+      if (hypothetical.test(clause) || negatedExposure.test(clause) && exposurePattern.test(clause)) return false;
+      if (!credentialPattern.test(clause) || !exposurePattern.test(clause)) return false;
+      // Japanese first-person subject/possessive must be grammatically attached
+      // to the event or credential. English requires an explicit "I" subject.
+      return jpActor.test(clause) || jpPossessive.test(clause) || englishActor.test(clause) || englishAuxiliaryActor.test(clause) || englishPossessive.test(clause);
+    });
+  });
 }
 
 function inspectSensitiveInput(prompt) {

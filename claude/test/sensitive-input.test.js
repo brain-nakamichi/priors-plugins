@@ -141,7 +141,7 @@ test('Claude prompt hook suppresses spawn, prompt/hash/candidate writes and raw 
   const preload = path.join(dir, 'preload.js');
   fs.writeFileSync(preload, "require('node:child_process').spawnSync = () => { require('node:fs').writeFileSync(process.env.SPAWN_MARKER, 'called'); throw new Error('synthetic-raw-error'); };\n");
   try {
-    for (const remember of ['0', '1']) {
+    for (const root of [ROOT]) for (const remember of ['0', '1']) {
       const audit = path.join(dir, 'audit'); const candidate = path.join(dir, 'candidate'); const marker = path.join(dir, 'spawn');
       for (const file of [audit, candidate, marker]) fs.rmSync(file, { force: true });
       const prompt = '前回の仕様を再開する。 token=synthetic-sensitive-example';
@@ -197,10 +197,29 @@ test('deferred cues use existing categories and shared guidance; hand alone is l
   }
 });
 
-test('Claude helpers match their safe counterparts; Codex prompt hook remains a separate integration', () => {
+test('Codex helper copies match and its two registered hooks use generic prompt guidance', () => {
   for (const name of ['sensitive-input.js', 'bounded-input.js']) assert.equal(fs.readFileSync(path.join(ROOT, 'hooks', name), 'utf8'), fs.readFileSync(path.join(CODEX, 'hooks', name), 'utf8'));
+  const hooks = JSON.parse(fs.readFileSync(path.join(CODEX, 'hooks', 'hooks.json'), 'utf8')).hooks;
+  assert.deepEqual(Object.keys(hooks).sort(), ['SessionStart', 'UserPromptSubmit']);
+  assert.equal(hooks.Stop, undefined);
+  assert.equal(hooks.UserPromptSubmit.length, 1);
+  const auditFile = path.join(os.tmpdir(), `priors-codex-guidance-no-audit-${process.pid}.jsonl`);
+  fs.rmSync(auditFile, { force: true });
+  const promptHook = spawnSync(process.execPath, [path.join(CODEX, 'hooks', 'user-prompt-submit.js')], {
+    input: JSON.stringify({ prompt: 'synthetic-private-prompt', hook_event_name: 'UserPromptSubmit' }), encoding: 'utf8',
+    env: { ...process.env, PRIORS_DECISION_AUDIT_FILE: auditFile },
+  });
+  assert.equal(promptHook.status, 0);
+  const promptOutput = JSON.parse(promptHook.stdout);
+  assert.equal(promptOutput.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(promptOutput.hookSpecificOutput.additionalContext, /Recall/);
+  assert.match(promptOutput.hookSpecificOutput.additionalContext, /Remember/);
+  assert.ok(!promptHook.stdout.includes('synthetic-private-prompt'));
+  assert.equal(fs.existsSync(auditFile), false);
   for (const root of [ROOT, CODEX]) {
-    const skill = fs.readFileSync(path.join(root, 'skills', 'priors', 'SKILL.md'), 'utf8') + (root === ROOT ? fs.readFileSync(path.join(ROOT, 'skills', 'priors', 'deferred-work.md'), 'utf8') : '');
+    const skillDir = path.join(root, 'skills', 'priors');
+    const skill = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8')
+      + fs.readFileSync(path.join(skillDir, 'deferred-work.md'), 'utf8');
     assert.match(skill, /UUID/); assert.match(skill, /full brief/); assert.match(skill, /idempotency_key/);
   }
 });
@@ -215,14 +234,49 @@ test('October 6 config-output shape uses synthetic Authorization and PAT fixture
 });
 
 test('value-free reports are work cues, not an automatic search veto', () => {
-  for (const prompt of ['認証情報を貼ってしまったので対応します', '漏洩した可能性のあるパスワード']) {
+  for (const prompt of [
+    '私が認証情報を貼ってしまったので対応します',
+    '私のAPIキーが漏洩しました',
+    '私は昨日トークンを貼った',
+    '私は昨日誤ってトークンを貼った',
+    'I pasted my password',
+    'I have pasted my token',
+    'I just pasted my token',
+    'I pasted my token and have not revoked it yet',
+    '私がトークンを貼ったのでまだ対応していません',
+  ]) {
     assert.equal(hasDisclosureReport(prompt), true);
     assert.equal(inspectSensitiveInput(prompt).suppress_auto_recall, false);
   }
+  for (const prompt of [
+    '認証情報を貼ってしまったので対応します',
+    '漏洩した可能性のあるパスワード',
+    '私のAPIキーが漏洩した可能性があります',
+    '私が認証情報を貼ったわけではない',
+    'My token was not leaked',
+    '私がトークンを貼ったかは不明です',
+    'I think I pasted my token',
+    '別の利用者が認証情報を貼ってしまったと報告した',
+    '別の利用者は私が認証情報を貼ったと報告した',
+    'Alice said I pasted my token',
+    'Alice said my token leaked',
+    'Yesterday Alice said my token leaked',
+    'Alice told me my token leaked',
+    'Aliceによると、私がトークンを貼った',
+    'Aliceは私がトークンを貼ったと報告した',
+    'Aliceが私のトークンが漏れたと報告した',
+    'Claude が「私が認証情報を貼ってしまった」と報告した',
+    'もし私が認証情報を貼ってしまったら、どうすればよいですか',
+    '> 私が認証情報を貼ってしまったので対応します',
+    '`私は昨日トークンを貼った`',
+    '`I pasted my password`',
+    'I might paste my token if I need to test this',
+    'I pasted my token, maybe',
+  ]) assert.equal(hasDisclosureReport(prompt), false, prompt);
   assert.equal(inspectSensitiveInput('トークンを貼った token=synthetic-example').suppress_auto_recall, true);
 });
 
-test('safety notices remain value-free; Claude Stop surfaces the current notice', () => {
+test('safe random audit notices survive end decision; only Claude has a Stop reminder hook', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-safe-notice-'));
   try {
     for (const [root, client] of [[ROOT, 'claude'], [CODEX, 'codex']]) {
@@ -233,9 +287,12 @@ test('safety notices remain value-free; Claude Stop surfaces the current notice'
       assert.match(notice.event.safety_notice_id, /^[0-9a-f-]{36}$/);
       audit.recordDecision({ decision: 'skip', client, phase: 'conversation-end' }, env);
       assert.equal(audit.inputSafetySummary(env).suspected, 1);
-      if (client === 'claude') {
+      if (root === ROOT) {
         const stop = spawnSync(process.execPath, [path.join(root, 'hooks', 'conversation-end.js')], { env, input: '{}', encoding: 'utf8' });
         assert.equal(stop.status, 0); assert.match(stop.stdout, /秘密疑い 1件/); assert.match(stop.stdout, /作業項目があるか/);
+      } else {
+        assert.equal(fs.existsSync(path.join(root, 'hooks', 'conversation-end.js')), false);
+        assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'hooks', 'hooks.json'), 'utf8')).hooks.Stop, undefined);
       }
       audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook' }, env);
       assert.equal(audit.inputSafetySummary(env).suspected, 0);
@@ -243,9 +300,9 @@ test('safety notices remain value-free; Claude Stop surfaces the current notice'
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('Codex lifecycle hooks remain unregistered; Claude owns prompt and end reminders', () => {
+test('Codex registers only turn-start guidance; Claude owns end reminders and save audit', () => {
   const codexHooks = require(path.join(CODEX, 'hooks', 'hooks.json')).hooks;
-  assert.equal(codexHooks.UserPromptSubmit, undefined);
+  assert.ok(codexHooks.UserPromptSubmit);
   assert.equal(codexHooks.Stop, undefined);
   assert.equal(codexHooks.PostToolUse, undefined);
   const claudeHooks = require(path.join(ROOT, 'hooks', 'hooks.json')).hooks;

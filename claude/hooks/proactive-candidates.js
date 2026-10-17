@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 
 const MAX_CANDIDATES = 100;
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const TURN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function candidatePath(env = process.env) {
   const configured = env.PRIORS_PROACTIVE_CANDIDATE_FILE;
@@ -27,9 +28,10 @@ function readJsonLines(file) {
   }
 }
 
-function recordProactiveCandidate({ promptHash, signals, confidence = 'low' }, env = process.env) {
+function recordProactiveCandidate({ promptHash, signals, confidence = 'low', turnId }, env = process.env) {
   if (!/^[0-9a-f]{64}$/.test(promptHash)) return null;
-  const categories = signals.filter((value) => value === 'recall-likely' || value === 'remember-candidate' || value === 'unresolved-candidate' || value === 'work-item-candidate');
+  const categories = signals.filter((value) => value === 'recall-likely' || value === 'remember-candidate'
+    || value === 'continuing-request-candidate' || value === 'unresolved-candidate' || value === 'work-item-candidate');
   if (categories.length === 0) return null;
   const file = candidatePath(env);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -39,8 +41,9 @@ function recordProactiveCandidate({ promptHash, signals, confidence = 'low' }, e
     source: 'local-heuristic',
     confidence: confidence === 'high' ? 'high' : 'low',
     prompt_sha256: promptHash,
+    ...(TURN_ID.test(turnId || '') ? { turn_id: turnId } : {}),
     categories,
-    candidate_id: `pc-${promptHash.slice(0, 12)}-${categories.join('-')}`,
+    candidate_id: `pc-${promptHash.slice(0, 12)}${TURN_ID.test(turnId || '') ? `-${turnId.slice(0, 8)}` : ''}-${categories.join('-')}`,
   };
   // Read the raw journal for writes.  A malformed line or a different
   // candidate schema must not make this writer truncate unrelated records.
@@ -54,6 +57,7 @@ function recordProactiveCandidate({ promptHash, signals, confidence = 'low' }, e
     && !item.reviewed_at && Number.isFinite(Date.parse(item.recorded_at || ''))
     && Date.parse(item.recorded_at || '') >= Date.now() - MAX_AGE_MS);
   const duplicate = existing.some((item) => item.prompt_sha256 === promptHash
+    && (TURN_ID.test(turnId || '') ? item.turn_id === turnId : !item.turn_id)
     && Array.isArray(item.categories)
     && item.categories.length === categories.length
     && item.categories.every((category) => categories.includes(category)));
@@ -74,8 +78,12 @@ function pendingProactiveCandidates(env = process.env) {
   });
 }
 
-function acknowledgeProactiveCandidates(decision, env = process.env) {
-  if (!['use-read', 'write-candidate', 'skip'].includes(decision)) return 0;
+function acknowledgeProactiveCandidates(decision, env = process.env, turnId) {
+  // Decision-only acknowledgement is safe for a same-turn no-save decision
+  // or a Recall-only use-read. Saves require candidate→resource receipts and
+  // must use acknowledgeProactiveCandidateIds after receipt validation.
+  if (!['use-read', 'skip'].includes(decision)) return 0;
+  if (!TURN_ID.test(turnId || '')) return 0;
   const categoriesToReview = decision === 'use-read' ? new Set(['recall-likely']) : null;
   const file = candidatePath(env);
   try {
@@ -83,22 +91,43 @@ function acknowledgeProactiveCandidates(decision, env = process.env) {
     const lines = raw.split(/\r?\n/).filter(Boolean);
     const reviewedAt = new Date().toISOString();
     let count = 0;
+    const previouslyReviewedIds = new Set();
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        if (event?.schema === 'priors.proactive-candidate.v1' && event.reviewed_at) {
+          if (typeof event.candidate_id === 'string') previouslyReviewedIds.add(event.candidate_id);
+        }
+      } catch { /* malformed records are preserved */ }
+    }
     const updated = lines.map((line) => {
       try {
         const event = JSON.parse(line);
-        if (event?.schema !== 'priors.proactive-candidate.v1' || event.reviewed_at) return line;
+        if (event?.schema !== 'priors.proactive-candidate.v1' || event.reviewed_at
+          || turnId && event.turn_id !== turnId) return line;
         if (categoriesToReview && !Array.isArray(event.categories)
           || categoriesToReview && !event.categories.some((category) => categoriesToReview.has(category))) return line;
         const timestamp = Date.parse(event.recorded_at || '');
         if (!Number.isFinite(timestamp) || timestamp < Date.now() - MAX_AGE_MS) return line;
         count += 1;
+        previouslyReviewedIds.add(event.candidate_id);
         return JSON.stringify({ ...event, reviewed_at: reviewedAt, review_decision: decision });
       } catch {
         return line;
       }
     });
+    const updatedWithDerived = updated.map((line) => {
+      try {
+        const event = JSON.parse(line);
+        if (!['priors.remember-candidate.v1', 'priors.checkpoint-candidate.v1', 'priors.work-item-candidate.v1'].includes(event?.schema)
+          || event.confirmation_state !== 'pending' || !Array.isArray(event.source_candidate_ids) || event.source_candidate_ids.length === 0
+          || !event.source_candidate_ids.every((id) => previouslyReviewedIds.has(id))) return line;
+        count += 1;
+        return JSON.stringify({ ...event, confirmation_state: 'acknowledged', acknowledged_at: reviewedAt, review_decision: decision });
+      } catch { return line; }
+    });
     if (count > 0) {
-      fs.writeFileSync(file, `${updated.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
+      fs.writeFileSync(file, `${updatedWithDerived.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
       try { fs.chmodSync(file, 0o600); } catch { /* Windows / ACLs: best effort */ }
     }
     return count;
@@ -107,12 +136,58 @@ function acknowledgeProactiveCandidates(decision, env = process.env) {
   }
 }
 
+// Accept only explicit candidate→saved-reference mappings from a successful
+// tool response. A generic same-turn save is never enough to clear a cue.
+function candidateReceiptForSave(turnId, tool, receipts, savedIds, env = process.env) {
+  if (!TURN_ID.test(turnId || '') || !['remember', 'amend', 'capture', 'work_create', 'work_event'].includes(tool)) return [];
+  if (!Array.isArray(receipts) || !Array.isArray(savedIds)) return [];
+  const pending = new Set(pendingProactiveCandidates(env).filter((event) => event.turn_id === turnId).map((event) => event.candidate_id));
+  return receipts.filter((receipt) => receipt && pending.has(receipt.candidate_id)
+    && Array.isArray(receipt.resource_ids) && receipt.resource_ids.length > 0
+    && receipt.resource_ids.every((id) => typeof id === 'string' && savedIds.includes(id)))
+    .map((receipt) => ({ candidate_id: receipt.candidate_id, resource_ids: [...new Set(receipt.resource_ids)] }))
+    .slice(0, 20);
+}
+
+function acknowledgeProactiveCandidateIds(candidateIds, decision, env = process.env) {
+  if (!Array.isArray(candidateIds) || candidateIds.length === 0 || !['write-candidate', 'use-read', 'skip'].includes(decision)) return 0;
+  const ids = new Set(candidateIds.filter((id) => typeof id === 'string'));
+  const file = candidatePath(env);
+  try {
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
+    const reviewedAt = new Date().toISOString();
+    let count = 0;
+    const updated = lines.map((line) => {
+      try {
+        const event = JSON.parse(line);
+        if (event?.schema === 'priors.proactive-candidate.v1' && ids.has(event.candidate_id) && !event.reviewed_at) {
+          count += 1;
+          return JSON.stringify({ ...event, reviewed_at: reviewedAt, review_decision: decision });
+        }
+        if (['priors.remember-candidate.v1', 'priors.checkpoint-candidate.v1', 'priors.work-item-candidate.v1'].includes(event?.schema)
+          && event.confirmation_state === 'pending' && Array.isArray(event.source_candidate_ids)
+          && event.source_candidate_ids.length > 0 && event.source_candidate_ids.every((id) => ids.has(id))) {
+          count += 1;
+          return JSON.stringify({ ...event, confirmation_state: 'acknowledged', acknowledged_at: reviewedAt, review_decision: decision });
+        }
+        return line;
+      } catch { return line; }
+    });
+    if (count > 0) {
+      fs.writeFileSync(file, `${updated.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
+      try { fs.chmodSync(file, 0o600); } catch { /* Windows / ACLs: best effort */ }
+    }
+    return count;
+  } catch { return 0; }
+}
+
 // Collapse the remember signals observed during a conversation into one
 // reviewable candidate.  The candidate intentionally contains hashes and
 // provenance only; the conversation text never crosses this boundary.
 function materializeRememberCandidate(env = process.env) {
   const source = pendingProactiveCandidates(env)
-    .filter((event) => Array.isArray(event.categories) && event.categories.includes('remember-candidate'))
+    .filter((event) => Array.isArray(event.categories)
+      && (event.categories.includes('remember-candidate') || event.categories.includes('continuing-request-candidate')))
     .map((event) => ({
       candidate_id: event.candidate_id,
       prompt_sha256: event.prompt_sha256,
@@ -434,7 +509,7 @@ function prepareWorkEvent(candidateId, workId, input = {}, env = process.env) {
 }
 
 function summarizeProactiveCandidates(env = process.env) {
-  const summary = { total: 0, high_confidence: 0, categories: { 'recall-likely': 0, 'remember-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 } };
+  const summary = { total: 0, high_confidence: 0, categories: { 'recall-likely': 0, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 } };
   for (const event of pendingProactiveCandidates(env)) {
     summary.total += 1;
     if (event.confidence === 'high') summary.high_confidence += 1;
@@ -473,6 +548,8 @@ module.exports = {
   summarizeProactiveCandidates,
   listProactiveCandidates,
   acknowledgeProactiveCandidates,
+  candidateReceiptForSave,
+  acknowledgeProactiveCandidateIds,
   materializeRememberCandidate,
   pendingRememberCandidates,
   materializeCheckpointCandidate,

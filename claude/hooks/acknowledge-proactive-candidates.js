@@ -3,16 +3,23 @@
 
 const { acknowledgeProactiveCandidates } = require('./proactive-candidates.js');
 
-function arg(name) {
-  const i = process.argv.indexOf(name);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+function arg(args, name) {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
 }
 
-const decision = arg('--decision');
-const count = acknowledgeProactiveCandidates(decision);
-if (!['use-read', 'write-candidate', 'skip'].includes(decision)) {
-  process.stdout.write(`${JSON.stringify({ ok: false, error: 'invalid_decision' })}\n`);
-  process.exitCode = 2;
-} else {
-  process.stdout.write(`${JSON.stringify({ ok: true, decision, acknowledged: count })}\n`);
+function run(args = process.argv.slice(2), env = process.env) {
+  const decision = arg(args, '--decision');
+  const turnId = arg(args, '--turn-id');
+  if (!['use-read', 'skip'].includes(decision)) return { exitCode: 2, payload: { ok: false, error: 'invalid_decision' } };
+  if (!turnId) return { exitCode: 2, payload: { ok: false, error: 'turn_id_required' } };
+  const acknowledged = acknowledgeProactiveCandidates(decision, env, turnId);
+  return { exitCode: 0, payload: { ok: true, decision, acknowledged } };
 }
+
+if (require.main === module) {
+  const result = run();
+  process.stdout.write(`${JSON.stringify(result.payload)}\n`);
+  process.exitCode = result.exitCode;
+}
+module.exports = { run };

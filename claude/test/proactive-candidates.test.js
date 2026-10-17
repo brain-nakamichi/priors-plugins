@@ -75,7 +75,7 @@ test('確認済み・期限切れ候補はpending要約から除外される', (
   const env = { ...process.env, PRIORS_PROACTIVE_CANDIDATE_FILE: file };
   try {
     fs.writeFileSync(file, [
-      { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'a'.repeat(64), categories: ['recall-likely'], source: 'local-heuristic', confidence: 'low' },
+      { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'a'.repeat(64), candidate_id: 'pc-aaaaaaaaaaaa-11111111-recall-likely', turn_id: '11111111-1111-4111-8111-111111111111', categories: ['recall-likely'], source: 'local-heuristic', confidence: 'low' },
       { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'b'.repeat(64), categories: ['remember-candidate'], source: 'local-heuristic', confidence: 'low', reviewed_at: new Date().toISOString(), review_decision: 'skip' },
       { schema: 'priors.proactive-candidate.v1', recorded_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(), prompt_sha256: 'c'.repeat(64), categories: ['unresolved-candidate'], source: 'local-heuristic', confidence: 'low' },
     ].map(JSON.stringify).join('\n') + '\n');
@@ -83,9 +83,10 @@ test('確認済み・期限切れ候補はpending要約から除外される', (
     assert.deepEqual(summarizeProactiveCandidates(env), {
       total: 1,
       high_confidence: 0,
-      categories: { 'recall-likely': 1, 'remember-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 },
+      categories: { 'recall-likely': 1, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 },
     });
-    assert.equal(acknowledgeProactiveCandidates('skip', env), 1);
+    assert.equal(acknowledgeProactiveCandidates('skip', env), 0, 'missing turn scope must not clear a queue');
+    assert.equal(acknowledgeProactiveCandidates('skip', env, '11111111-1111-4111-8111-111111111111'), 1);
     assert.equal(pendingProactiveCandidates(env).length, 0);
     const stored = fs.readFileSync(file, 'utf8');
     assert.match(stored, /review_decision":"skip/);
@@ -101,10 +102,10 @@ test('use-readはRecall候補だけを確認済みにする', () => {
   const env = { ...process.env, PRIORS_PROACTIVE_CANDIDATE_FILE: file };
   try {
     fs.writeFileSync(file, [
-      { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'd'.repeat(64), categories: ['recall-likely'], source: 'local-heuristic', confidence: 'low' },
-      { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'e'.repeat(64), categories: ['remember-candidate'], source: 'local-heuristic', confidence: 'low' },
+      { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'd'.repeat(64), candidate_id: 'pc-dddddddddddd-22222222-recall-likely', turn_id: '22222222-2222-4222-8222-222222222222', categories: ['recall-likely'], source: 'local-heuristic', confidence: 'low' },
+      { schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(), prompt_sha256: 'e'.repeat(64), candidate_id: 'pc-eeeeeeeeeeee-22222222-remember-candidate', turn_id: '22222222-2222-4222-8222-222222222222', categories: ['remember-candidate'], source: 'local-heuristic', confidence: 'low' },
     ].map(JSON.stringify).join('\n') + '\n');
-    assert.equal(acknowledgeProactiveCandidates('use-read', env), 1);
+    assert.equal(acknowledgeProactiveCandidates('use-read', env, '22222222-2222-4222-8222-222222222222'), 1);
     const pending = pendingProactiveCandidates(env);
     assert.equal(pending.length, 1);
     assert.deepEqual(pending[0].categories, ['remember-candidate']);

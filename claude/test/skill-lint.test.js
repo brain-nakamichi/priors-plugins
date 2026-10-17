@@ -11,6 +11,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SKILL = path.join(__dirname, '..', 'skills', 'priors', 'SKILL.md');
+// monorepo（Priors/plugin + Priors/codex-plugins/priors）と公開ミラー（claude/ + codex/）の両方で動かす
+const MIRROR_CODEX = path.join(__dirname, '..', '..', 'codex');
+const CODEX_ROOT = fs.existsSync(MIRROR_CODEX) ? MIRROR_CODEX : path.join(__dirname, '..', '..', 'codex-plugins', 'priors');
+const CODEX_SKILL = path.join(CODEX_ROOT, 'skills', 'priors', 'SKILL.md');
+const CODEX_SKILL_DIR = path.dirname(CODEX_SKILL);
 const text = fs.readFileSync(SKILL, 'utf8').replace(/\r\n?/g, '\n');
 const body = text.replace(/^---[\s\S]*?---\n/, ''); // frontmatter を除く
 
@@ -53,6 +58,8 @@ test('states the rules the design requires', () => {
   assert.match(body, /theme_switch_required/);
   assert.match(body, /利用者に提示/);
   assert.match(body, /ZZPROBE/);
+  // hook input の session_id はクライアント側の識別子で、Priors tool へ渡すと別セッション扱いになる
+  assert.match(body, /hook input の `session_id`.*渡さない/);
 });
 
 test('Codex/Claude 共通の保持・Recall基準と機能合成を明記する', () => {
@@ -74,4 +81,26 @@ test('length stays within a reasonable budget for a skill loaded on demand', () 
   const lines = body.split('\n').length;
   assert.ok(lines <= 120, `SKILL.md has ${lines} lines`);
   assert.ok(text.length <= 8000, `SKILL.md has ${text.length} chars`);
+});
+
+test('Codex skill stays within the shared 8,000-character / 120-line budget', () => {
+  const codexText = fs.readFileSync(CODEX_SKILL, 'utf8').replace(/\r\n?/g, '\n');
+  const codexBody = codexText.replace(/^---[\s\S]*?---\n/, '');
+  assert.ok(codexBody.split('\n').length <= 120,
+    `Codex SKILL.md has ${codexBody.split('\n').length} lines`);
+  assert.ok(codexText.length <= 8000,
+    `Codex SKILL.md has ${codexText.length} chars`);
+  // Rules that apply on every turn must stay in the always-loaded body, not only in on-demand references.
+  assert.match(codexBody, /`guard`/, 'Codex SKILL.md body requires an explicit guard before material changes');
+  assert.match(codexBody, /PRIORS_TOKEN_CODEX_V1/, 'Codex SKILL.md body keeps the token-handling rule');
+  assert.match(codexBody, /Keep the active theme explicit/, 'Codex SKILL.md body keeps the explicit-theme rule');
+  assert.match(codexBody, /human-protected/, 'Codex SKILL.md body keeps the human-protected boundary');
+  for (const reference of [
+    'daily-cross-client-route.md', 'theme-organization.md',
+    'retention-and-search-cards.md',
+    'working-cache.md', 'deferred-work.md', 'search-card-recovery.md',
+  ]) {
+    assert.ok(fs.existsSync(path.join(CODEX_SKILL_DIR, reference)),
+      `missing Codex skill reference: ${reference}`);
+  }
 });
