@@ -12,10 +12,19 @@ Use Priors according to the triggers below; there is no all-turn search or fixed
 - Retain durable user instructions/preferences, important decisions and constraints (including rejected alternatives), unresolved commitments, significant operational/safety/recovery results, and material corrections or new evidence. Preserve source, uncertainty, and whether something is decided or proposed.
 - Do not retain ordinary facts, transient topics, secrets, or information the user forbids saving.
 - Recall before depending on prior decisions/specifications, during a resume or handoff, when an old mistake/rejected approach could recur, for history questions, or when missing context could change an important answer/action. If current conversation already contains enough, avoid duplicate retrieval. Do not search every turn or the whole theme.
+- Moments where recalling right before deciding often helps (examples, not a fixed procedure; skip when the current conversation already has enough; recalled memory informs the decision but does not replace checking the actual artifact): before judging which version, branch, or published artifact is newer or correct (recall the history, then check the artifact); before a change that may contradict a past decision or user policy; before describing another AI's (e.g. Claude's) work status instead of guessing; before repeating the same failed attempt or investigation, or when a new failure needs "why did this not happen before"; before deploying or applying to production (which commit and migrations production runs now).
 - Choose among `context_open`, `recall`/`consult`, `get`, `timeline`, `expand`, and other tools for the task. There is no fixed order, no A→B→C topic-switch detection, and no bulk reconstruction.
 - A hook cue, local candidate, or audit line does not prove a successful read/write. Claim a save only after the success response returns a memory ID and version. Treat denial, failure, timeout, or unknown outcome as unverified.
 
 Use the Priors MCP server when prior project decisions, design notes, or handoffs would help.
+
+## Grow subthemes on your own judgment
+
+Whenever it helps, do the following without prior user approval and report what you did (ownership and safety requirements do not change; stop if the user stops it):
+- Create subthemes and add memories to them by reference (`subtheme_classify` add; removing a reference counts as a revision). Classify in batches per topic (up to 50 per call): references use no body quota, but every call uses rows (changed rows + 1).
+- Revise or append to items, and delete items whose resolution you confirmed, only in subthemes you can confirm from the conversation or memory that you (this client) created, or in a personal theme (except subthemes known to be created by another client). For any other subtheme (creator unknown; possibly another AI or user), report the proposed revision or deletion and wait for confirmation.
+- "Delete" here means `soft_delete` only (recoverable with `restore`). Use `erase_*` only when the user explicitly asks. If a resolution cannot be confirmed, do not delete; revise the item's status instead. The rule against deleting resolved memories applies to parent-theme memories.
+- Check the quota in responses (2,000 owner rows, 2 MiB input, not refunded on delete); `append` is cheaper than `revise`.
 
 ## One subject per memory
 

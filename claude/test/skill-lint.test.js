@@ -77,19 +77,31 @@ test('Codex/Claude 共通の保持・Recall基準と機能合成を明記する'
   assert.match(body, /未検出は不要の証明ではない/);
 });
 
-test('length stays within a reasonable budget for a skill loaded on demand', () => {
-  const lines = body.split('\n').length;
-  assert.ok(lines <= 120, `SKILL.md has ${lines} lines`);
-  assert.ok(text.length <= 8000, `SKILL.md has ${text.length} chars`);
+test('both skills name concrete moments to recall and let the AI maintain subthemes without prior approval', () => {
+  const codexBody = fs.readFileSync(CODEX_SKILL, 'utf8').replace(/\r\n?/g, '\n');
+  // recall moments are examples, not a fixed procedure, and never replace checking the artifact
+  assert.match(body, /判断の直前に当てはまりやすい例（固定手順ではない/);
+  assert.match(body, /実物の確認を置き換えない/);
+  assert.match(body, /本番へ配備・適用する前/);
+  assert.match(codexBody, /examples, not a fixed procedure/);
+  assert.match(codexBody, /does not replace checking the actual artifact/);
+  // the permission comes with its guardrails: ownership scope, soft_delete only, erase only on request
+  assert.match(body, /利用者の事前の許可なく行い、行ったことを報告してよい範囲（所有権・安全の条件は変わらない/);
+  assert.match(body, /自分（このクライアント）が作成したと会話や記憶で確認できるサブテーマ、または personal テーマ（別のクライアントが作成したと分かっているものは除く）/);
+  assert.match(body, /改訂・削除の案を報告して確認を待つ/);
+  assert.match(body, /削除は `soft_delete`（`restore` で戻せる）だけ。消去（`erase_\*`）は利用者が明示的に依頼したときだけ/);
+  assert.match(body, /親テーマの解決済み記憶の削除は禁止/);
+  assert.match(codexBody, /without prior user approval and report what you did \(ownership and safety requirements do not change/);
+  assert.match(codexBody, /report the proposed revision or deletion and wait for confirmation/);
+  assert.match(codexBody, /"Delete" here means `soft_delete` only/);
+  assert.match(codexBody, /Use `erase_\*` only when the user explicitly asks/);
 });
 
-test('Codex skill stays within the shared 8,000-character / 120-line budget', () => {
+// No length budget (user decision GEN-1418): the 8,000-character / 120-line cap was a Priors-only lint rule,
+// not a Claude Code or Codex limit. Guidance is written in full rather than trimmed to a size.
+test('Codex skill keeps the always-on rules in its body and ships its references', () => {
   const codexText = fs.readFileSync(CODEX_SKILL, 'utf8').replace(/\r\n?/g, '\n');
   const codexBody = codexText.replace(/^---[\s\S]*?---\n/, '');
-  assert.ok(codexBody.split('\n').length <= 120,
-    `Codex SKILL.md has ${codexBody.split('\n').length} lines`);
-  assert.ok(codexText.length <= 8000,
-    `Codex SKILL.md has ${codexText.length} chars`);
   // Rules that apply on every turn must stay in the always-loaded body, not only in on-demand references.
   assert.match(codexBody, /`guard`/, 'Codex SKILL.md body requires an explicit guard before material changes');
   assert.match(codexBody, /PRIORS_TOKEN_CODEX_V1/, 'Codex SKILL.md body keeps the token-handling rule');
