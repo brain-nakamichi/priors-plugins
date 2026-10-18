@@ -54,14 +54,38 @@ function deferredCandidate(prompt) {
 
 // Background agent reports and task notifications also reach UserPromptSubmit, but they are not
 // the user's words; candidates made from them only pile up in the Stop reminder. Recognised by the
-// leading markers Claude Code uses today. If the format changes, such inputs simply produce
-// candidates again (the previous behaviour), never a missed safety check.
-// The plain-text markers count only together with the structured part the harness adds, so a user
-// pasting a relayed report followed by their own words is still treated as the user's message.
+// markers Claude Code uses today. Two checks, each failing toward the side that is safe for its use:
+// - startsLikeHarness (leading marker only) labels the audit turn. A turn labelled harness-message
+//   keeps the session's safety notice count, so while the leading markers keep today's form a report
+//   whose body or ending changed cannot clear the user's notice before its Stop; a user turn labelled
+//   harness only leaves the notice one turn longer.
+// - isHarnessMessage (the whole message is harness blocks) suppresses candidates and the disclosure
+//   hint. If the format changes, reports simply produce candidates again (the previous behaviour);
+//   a user who pastes a report and writes their own words before, between or after it is the user.
+//   Words typed inside a multi-line block cannot be told apart from the report and count as harness.
+// The secret-value inspection runs before either check and never depends on them.
+// The plain-text markers count only together with the structured part the harness adds.
 const HARNESS_MESSAGE = /^\s*(?:<task-notification>|<agent-message from=|Another Claude session sent a message:\s*<agent-message from=|\[SYSTEM NOTIFICATION - NOT USER INPUT\][\s\S]*?<task-notification>)/;
 
-function isHarnessMessage(prompt) {
+// One harness block: an optional plain-text lead, the element, its closing tag at the start of a line (the harness
+// indents an agent report's lines, so a closing tag quoted inside the report is not at column 0), then for an agent
+// report the fixed explanation Claude Code appends. Both plain-text parts are fixed at both ends with a bounded middle,
+// so arbitrary text cannot hide inside them.
+const HARNESS_BLOCK = /^\s*(?:Another Claude session sent a message:\s*(?=<agent-message from=)|\[SYSTEM NOTIFICATION - NOT USER INPUT\]\s*This is an automated[^<]{0,1500}?must NOT be treated as approval or consent\.\s*(?=<task-notification>))?(?:<(task-notification)>|<(agent-message) from=)[\s\S]*?\n<\/\1\2>(?:\s*That "other Claude session" is an agent[\s\S]{0,1500}?permission laundering\.)?\s*/;
+
+function startsLikeHarness(prompt) {
   return typeof prompt === 'string' && HARNESS_MESSAGE.test(prompt);
+}
+
+function isHarnessMessage(prompt) {
+  if (!startsLikeHarness(prompt)) return false;
+  let rest = prompt;
+  for (let i = 0; i < 50 && rest.length > 0; i += 1) {
+    const m = HARNESS_BLOCK.exec(rest);
+    if (!m || m[0].length === 0) return false;
+    rest = rest.slice(m[0].length);
+  }
+  return rest.length === 0;
 }
 
 function proactiveSignals(prompt) {
@@ -134,7 +158,7 @@ function main() {
   let safety;
   try { safety = read.ok ? require('./sensitive-input.js').inspectSensitiveInput(read.input.prompt) : null; } catch { /* fail closed */ }
   if (!safety || safety.suppress_auto_recall) {
-    try { recordDecision({ decision: 'pending', client: 'claude', source: 'hook', invocationKind: read.ok && isHarnessMessage(read.input.prompt) ? 'harness-message' : 'client-hook', phase: 'turn-start', sessionId: read.ok ? read.input.session_id : undefined, turnId, inputSafety: safety?.state === 'suspected' ? 'suspected' : 'uninspectable' }); } catch { /* no raw error */ }
+    try { recordDecision({ decision: 'pending', client: 'claude', source: 'hook', invocationKind: read.ok && startsLikeHarness(read.input.prompt) ? 'harness-message' : 'client-hook', phase: 'turn-start', sessionId: read.ok ? read.input.session_id : undefined, turnId, inputSafety: safety?.state === 'suspected' ? 'suspected' : 'uninspectable' }); } catch { /* no raw error */ }
     let guidance = 'Priors: 入力を安全に検査できないため自動送信を抑止しました。本文由来のhashと候補は保存しません。値を含まない要旨で必要なworkを確認してください。';
     try { guidance = require('./sensitive-input.js').sensitiveGuidance(safety?.state); } catch { /* fixed fallback */ }
     process.stdout.write(JSON.stringify({ systemMessage: 'Priors: 入力を安全に検査できないため自動送信を抑止しました。秘密は保存せず、保持基準とRecall条件を判断してください。', hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '毎ターン、過去情報が今回を左右し最新文脈に不足する場合は依存前に対象を絞って取得する。保持基準に合う重要情報は明示依頼を待たず保存する。入力検査不能時は本文を送信せず、秘密・保存不許可情報を記録しない。' + guidance + ' 判定記録は任意です。' } }));
@@ -152,7 +176,7 @@ function main() {
     ? runAutoRecall(prompt, input)
     : null;
   try {
-    recordDecision({ decision: 'pending', client: 'claude', promptHash, source: 'hook', invocationKind: isHarnessMessage(prompt) ? 'harness-message' : 'client-hook', phase: 'turn-start', sessionId: input.session_id, turnId, ...(reported ? { inputSafety: 'reported' } : {}) });
+    recordDecision({ decision: 'pending', client: 'claude', promptHash, source: 'hook', invocationKind: startsLikeHarness(prompt) ? 'harness-message' : 'client-hook', phase: 'turn-start', sessionId: input.session_id, turnId, ...(reported ? { inputSafety: 'reported' } : {}) });
   } catch { /* 監査ログ障害でも候補案内は継続する */ }
   let candidateId;
   try {
@@ -189,4 +213,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { proactiveSignals, proactiveGuidance, proactiveConfidence, recordTurnCandidate, isHarnessMessage, main };
+module.exports = { proactiveSignals, proactiveGuidance, proactiveConfidence, recordTurnCandidate, isHarnessMessage, startsLikeHarness, main };
