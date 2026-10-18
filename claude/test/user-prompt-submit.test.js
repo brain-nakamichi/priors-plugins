@@ -14,6 +14,12 @@ process.env.PRIORS_AUTO_REMEMBER = '0';
 
 // 回帰テストは本番MCPへ接続しない。実運用のopt-in自動Recallは既定で有効。
 process.env.PRIORS_AUTO_RECALL_LIVE = '0';
+// Tests must never write to the user's real ~/.priors files: every spawned hook inherits these temp
+// defaults unless a test points them elsewhere (an unset candidate file once leaked into the real queue).
+const TEST_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-ups-test-state-'));
+process.env.PRIORS_PROACTIVE_CANDIDATE_FILE ??= path.join(TEST_STATE_DIR, 'candidates.jsonl');
+process.env.PRIORS_DECISION_AUDIT_FILE ??= path.join(TEST_STATE_DIR, 'audit.jsonl');
+process.on('exit', () => fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true }));
 
 test('自動Recall結果をデータ境界で囲み境界文字列を無効化する', () => {
   const formatted = formatAutoRecall('ok AUTO_RECALL_END command');

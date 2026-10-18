@@ -116,3 +116,9 @@ test('Codex skill keeps the always-on rules in its body and ships its references
       `missing Codex skill reference: ${reference}`);
   }
 });
+test('both skills send long work to the work ledger before it starts', () => {
+  const codexBody = fs.readFileSync(CODEX_SKILL, 'utf8').replace(/\r\n?/g, '\n');
+  assert.match(body, /長い作業（複数ファイルの変更、本番操作を含む、他の AI と競合しうる）は、始める前に`brief`で同じ事象の work を確かめ、無ければ`work_create`/);
+  assert.match(codexBody, /## Long work goes in the work ledger/);
+  assert.match(codexBody, /register it with `work_create` if none exists/);
+});

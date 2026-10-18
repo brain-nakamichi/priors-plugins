@@ -26,6 +26,10 @@ Whenever it helps, do the following without prior user approval and report what 
 - "Delete" here means `soft_delete` only (recoverable with `restore`). Use `erase_*` only when the user explicitly asks. If a resolution cannot be confirmed, do not delete; revise the item's status instead. The rule against deleting resolved memories applies to parent-theme memories.
 - Check the quota in responses (2,000 owner rows, 2 MiB input, not refunded on delete); `append` is cheaper than `revise`.
 
+## Long work goes in the work ledger
+
+Before long work (changes across several files, production operations, or work that may collide with another AI), check for the same work with `brief`, and register it with `work_create` if none exists (your judgment; not required). The ledger is the state of record for long work; a working note supplements it and carries the work_id.
+
 ## One subject per memory
 
 Write one memory per subject. Keep deployment/work reports short and link subject memories with `relates_to`; do not dilute an existing memory by adding another subject.
