@@ -50,13 +50,12 @@ function inputSafetySummary(env = process.env, client = 'codex') {
   const counts = { suspected: 0, uninspectable: 0, reported: 0 };
   try {
     const lines = fs.readFileSync(auditPath(env), 'utf8').trim().split(/\r?\n/).slice(-256);
-    let ended = false;
     for (const line of lines) {
       let event; try { event = JSON.parse(line); } catch { continue; }
       if (event?.schema !== 'priors.decision-audit.v1' || event.client !== client) continue;
-      if (ended && event.phase === 'turn-start') { counts.suspected = counts.uninspectable = counts.reported = 0; ended = false; }
+      // Count only the latest turn (see the Claude plugin's decision-audit.js).
+      if (event.phase === 'turn-start') counts.suspected = counts.uninspectable = counts.reported = 0;
       if (Object.hasOwn(counts, event.input_safety)) counts[event.input_safety]++;
-      if (event.phase === 'conversation-end' && event.source === 'explicit') ended = true;
     }
   } catch { /* no raw errors */ }
   return counts;

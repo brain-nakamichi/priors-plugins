@@ -46,7 +46,7 @@ try {
   })();
   // Claude may invoke Stop again while continuing after a hook. Do not emit
   // another reminder in that re-entrant path.
-  const safetyGuidance = inputSafetyGuidance(inputSafetySummary());
+  const safetyGuidance = inputSafetyGuidance(inputSafetySummary(process.env, 'claude', typeof input.session_id === 'string' ? input.session_id : undefined));
   if (input.stop_hook_active === true) process.exit(0);
   // Autonomous Remember mode is the default. Setting the variable to 0 keeps
   // the legacy candidate-queue behavior; neither mode forces a write.

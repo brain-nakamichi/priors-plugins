@@ -155,7 +155,7 @@ function updateTurnState(event, env = process.env) {
 function recordDecision({ decision, client, promptHash, source = 'explicit', phase = 'unknown', save, inputSafety, sessionId, invocationKind, turnId }, env = process.env) {
   if (!DECISIONS.has(decision)) throw new Error('invalid decision');
   if (!PHASES.has(phase)) throw new Error('invalid phase');
-  if (invocationKind !== undefined && !['explicit-helper', 'client-hook'].includes(invocationKind)) throw new Error('invalid invocation kind');
+  if (invocationKind !== undefined && !['explicit-helper', 'client-hook', 'harness-message'].includes(invocationKind)) throw new Error('invalid invocation kind');
   const saveRecord = normalizeSave(save);
   const resolvedTurnId = TURN_ID.test(turnId || '') ? turnId : undefined;
   const file = auditPath(env);
@@ -184,21 +184,25 @@ function recordDecision({ decision, client, promptHash, source = 'explicit', pha
 
 // Prompt-independent notices for the latest turn. Completion of an ordinary
 // save is not proof that credential work exists, so retain the notice at Stop.
-// A new turn after an explicit end starts a new reminder window.
-function inputSafetySummary(env = process.env, client = 'claude') {
+// Counts belong to the latest turn of this session: a turn-start begins a new count, except
+// turns started by a background agent report or task notification (they are not the user's).
+function inputSafetySummary(env = process.env, client = 'claude', sessionId) {
   const counts = { suspected: 0, uninspectable: 0, reported: 0 };
   try {
     const lines = readTail(auditPath(env)).trim().split(/\r?\n/).slice(-256);
-    let ended = false;
     for (const line of lines) {
       let event; try { event = JSON.parse(line); } catch { continue; }
       if (event?.schema !== 'priors.decision-audit.v1' || event.client !== client) continue;
-      if (ended && event.phase === 'turn-start') {
+      // The audit file is shared by every session; another session's turn must neither reset nor
+      // add to this session's count. Rows without a session_id are kept (fail toward notifying).
+      if (sessionId && event.session_id && event.session_id !== sessionId) continue;
+      // Every user turn-start begins a new count (waiting for an explicit conversation-end decision
+      // kept an old notice alive forever once that decision stopped being recorded routinely).
+      // A row without a session id is counted but never resets another session's count.
+      if (event.phase === 'turn-start' && event.invocation_kind !== 'harness-message' && !(sessionId && !event.session_id)) {
         counts.suspected = counts.uninspectable = counts.reported = 0;
-        ended = false;
       }
       if (Object.hasOwn(counts, event.input_safety)) counts[event.input_safety]++;
-      if (event.phase === 'conversation-end' && event.source === 'explicit') ended = true;
     }
   } catch { /* do not echo errors */ }
   return counts;

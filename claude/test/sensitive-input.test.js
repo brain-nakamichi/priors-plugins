@@ -356,3 +356,55 @@ test('other client decisions cannot clear or contaminate a safety notice', () =>
     assert.deepEqual(audit.inputSafetySummary(env), { suspected: 1, reported: 0, uninspectable: 0 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a safety notice is counted only for its own turn, even when no explicit end decision is recorded', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-notice-turn-scope-'));
+  try {
+    for (const [root, client] of [[ROOT, 'claude'], [CODEX, 'codex']]) {
+      const audit = require(path.join(root, 'hooks', 'decision-audit.js'));
+      const env = { PRIORS_DECISION_AUDIT_FILE: path.join(dir, client + '-audit') };
+      audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook', inputSafety: 'reported' }, env);
+      assert.equal(audit.inputSafetySummary(env).reported, 1, 'the notice belongs to its own turn');
+      // later turns arrive without any explicit conversation-end decision in between
+      audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook' }, env);
+      audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook' }, env);
+      assert.deepEqual(audit.inputSafetySummary(env), { suspected: 0, uninspectable: 0, reported: 0 }, client);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('another session or an agent-report turn does not clear this session notice before its Stop', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-notice-session-'));
+  try {
+    const audit = require('../hooks/decision-audit.js');
+    const env = { PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit') };
+    const A = '11111111-1111-4111-8111-111111111111'; const B = '22222222-2222-4222-8222-222222222222';
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'client-hook', sessionId: A, inputSafety: 'reported' }, env);
+    // a parallel session starts a turn, and an agent report arrives in session A mid-turn
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'client-hook', sessionId: B }, env);
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'harness-message', sessionId: A }, env);
+    assert.equal(audit.inputSafetySummary(env, 'claude', A).reported, 1, 'A keeps its notice until its Stop');
+    assert.equal(audit.inputSafetySummary(env, 'claude', B).reported, 0, 'B never sees A notice');
+    // the next user turn in A starts a new count
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'client-hook', sessionId: A }, env);
+    assert.equal(audit.inputSafetySummary(env, 'claude', A).reported, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('another session or an agent-report turn does not clear this session notice before its Stop', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-notice-session-'));
+  try {
+    const audit = require('../hooks/decision-audit.js');
+    const env = { PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit') };
+    const A = '11111111-1111-4111-8111-111111111111'; const B = '22222222-2222-4222-8222-222222222222';
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'client-hook', sessionId: A, inputSafety: 'reported' }, env);
+    // a parallel session starts a turn, and an agent report arrives in session A mid-turn
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'client-hook', sessionId: B }, env);
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'harness-message', sessionId: A }, env);
+    assert.equal(audit.inputSafetySummary(env, 'claude', A).reported, 1, 'A keeps its notice until its Stop');
+    assert.equal(audit.inputSafetySummary(env, 'claude', B).reported, 0, 'B never sees A notice');
+    // the next user turn in A starts a new count
+    audit.recordDecision({ decision: 'pending', client: 'claude', phase: 'turn-start', source: 'hook', invocationKind: 'client-hook', sessionId: A }, env);
+    assert.equal(audit.inputSafetySummary(env, 'claude', A).reported, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

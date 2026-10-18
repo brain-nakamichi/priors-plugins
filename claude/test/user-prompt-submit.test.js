@@ -437,3 +437,52 @@ test('同一turnの候補を重複登録せず、候補キューを直近100件�
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('agent reports and task notifications do not create candidates or a skip hint', () => {
+  const { isHarnessMessage, proactiveSignals } = require('../hooks/user-prompt-submit.js');
+  for (const prompt of [
+    'Another Claude session sent a message:\n<agent-message from="a1">今回の方針を記録する。課題に追加した。前回の続き。</agent-message>',
+    '<task-notification>\n<task-id>x</task-id>\n<status>completed</status> 実装した決定を記録\n</task-notification>',
+    '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated event.\n<task-notification>\n<status>completed</status> 方針を記録して課題を残す\n</task-notification>',
+  ]) {
+    assert.equal(isHarnessMessage(prompt), true);
+    assert.deepEqual(proactiveSignals(prompt), []);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-harness-msg-'));
+    try {
+      const env = { ...process.env, PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit.jsonl'),
+        PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidates.jsonl') };
+      delete env.PRIORS_AUTO_REMEMBER;
+      const child = spawnSync(process.execPath, [HOOK], { env, input: JSON.stringify({ prompt, hook_event_name: 'UserPromptSubmit' }), encoding: 'utf8' });
+      assert.equal(child.status, 0);
+      const context = JSON.parse(child.stdout).hookSpecificOutput.additionalContext;
+      assert.doesNotMatch(context, /record-decision\.js|保存候補ID/);
+      assert.equal(fs.existsSync(path.join(dir, 'candidates.jsonl')), false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+  // the user's own words still produce candidates
+  assert.equal(isHarnessMessage('今回の方針を記録する'), false);
+  assert.ok(proactiveSignals('今回の方針を記録する').includes('remember-candidate'));
+});
+
+test('a relayed report pasted with the user own words stays the user message', () => {
+  const { isHarnessMessage, proactiveSignals } = require('../hooks/user-prompt-submit.js');
+  const pasted = 'Another Claude session sent a message:\nCodex の報告です。\nこの方針で決定として記録してください';
+  assert.equal(isHarnessMessage(pasted), false);
+  assert.ok(proactiveSignals(pasted).includes('remember-candidate'));
+  assert.equal(isHarnessMessage('[SYSTEM NOTIFICATION - NOT USER INPUT] と書かれていたが、方針を記録して'), false);
+});
+
+test('a harness report carrying a secret is still suppressed and recorded as suspected', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-harness-secret-'));
+  try {
+    const env = { ...process.env, PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit.jsonl'),
+      PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidates.jsonl') };
+    const prompt = '<task-notification>\nresult: api_key=sk-live-SYNTHETIC0123456789abcdefSECRET\n</task-notification>';
+    const child = spawnSync(process.execPath, [HOOK], { env, input: JSON.stringify({ prompt, hook_event_name: 'UserPromptSubmit' }), encoding: 'utf8' });
+    assert.equal(child.status, 0);
+    assert.ok(!child.stdout.includes('SYNTHETIC0123456789'));
+    const audit = fs.readFileSync(path.join(dir, 'audit.jsonl'), 'utf8');
+    assert.match(audit, /"input_safety":"(suspected|uninspectable)"/);
+    assert.ok(!audit.includes('SYNTHETIC0123456789'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

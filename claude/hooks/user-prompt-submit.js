@@ -52,7 +52,20 @@ function deferredCandidate(prompt) {
   return DEFERRED.test(prompt) && ACTION.test(prompt) || /(?:お手元|手元|操作待ち)/u.test(prompt);
 }
 
+// Background agent reports and task notifications also reach UserPromptSubmit, but they are not
+// the user's words; candidates made from them only pile up in the Stop reminder. Recognised by the
+// leading markers Claude Code uses today. If the format changes, such inputs simply produce
+// candidates again (the previous behaviour), never a missed safety check.
+// The plain-text markers count only together with the structured part the harness adds, so a user
+// pasting a relayed report followed by their own words is still treated as the user's message.
+const HARNESS_MESSAGE = /^\s*(?:<task-notification>|<agent-message from=|Another Claude session sent a message:\s*<agent-message from=|\[SYSTEM NOTIFICATION - NOT USER INPUT\][\s\S]*?<task-notification>)/;
+
+function isHarnessMessage(prompt) {
+  return typeof prompt === 'string' && HARNESS_MESSAGE.test(prompt);
+}
+
 function proactiveSignals(prompt) {
+  if (isHarnessMessage(prompt)) return [];
   const text = prompt.toLocaleLowerCase();
   const signals = [];
   if (/(前回|続き|再開|既存|仕様|制約|なぜ|recall|remember|decision|deploy|rollback|本番|課題|未実装|実装|テスト)/u.test(text)) signals.push('recall-likely');
@@ -121,14 +134,15 @@ function main() {
   let safety;
   try { safety = read.ok ? require('./sensitive-input.js').inspectSensitiveInput(read.input.prompt) : null; } catch { /* fail closed */ }
   if (!safety || safety.suppress_auto_recall) {
-    try { recordDecision({ decision: 'pending', client: 'claude', source: 'hook', invocationKind: 'client-hook', phase: 'turn-start', sessionId: read.ok ? read.input.session_id : undefined, turnId, inputSafety: safety?.state === 'suspected' ? 'suspected' : 'uninspectable' }); } catch { /* no raw error */ }
+    try { recordDecision({ decision: 'pending', client: 'claude', source: 'hook', invocationKind: read.ok && isHarnessMessage(read.input.prompt) ? 'harness-message' : 'client-hook', phase: 'turn-start', sessionId: read.ok ? read.input.session_id : undefined, turnId, inputSafety: safety?.state === 'suspected' ? 'suspected' : 'uninspectable' }); } catch { /* no raw error */ }
     let guidance = 'Priors: 入力を安全に検査できないため自動送信を抑止しました。本文由来のhashと候補は保存しません。値を含まない要旨で必要なworkを確認してください。';
     try { guidance = require('./sensitive-input.js').sensitiveGuidance(safety?.state); } catch { /* fixed fallback */ }
     process.stdout.write(JSON.stringify({ systemMessage: 'Priors: 入力を安全に検査できないため自動送信を抑止しました。秘密は保存せず、保持基準とRecall条件を判断してください。', hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '毎ターン、過去情報が今回を左右し最新文脈に不足する場合は依存前に対象を絞って取得する。保持基準に合う重要情報は明示依頼を待たず保存する。入力検査不能時は本文を送信せず、秘密・保存不許可情報を記録しない。' + guidance + ' 判定記録は任意です。' } }));
     return;
   }
   const input = read.input;
-  const reported = require('./sensitive-input.js').hasDisclosureReport(input.prompt);
+  // A disclosure report is the user's own statement; an agent report quoting such words is not.
+  const reported = !isHarnessMessage(input.prompt) && require('./sensitive-input.js').hasDisclosureReport(input.prompt);
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
   const promptHash = hashPrompt(prompt);
   const signals = proactiveSignals(prompt);
@@ -138,7 +152,7 @@ function main() {
     ? runAutoRecall(prompt, input)
     : null;
   try {
-    recordDecision({ decision: 'pending', client: 'claude', promptHash, source: 'hook', invocationKind: 'client-hook', phase: 'turn-start', sessionId: input.session_id, turnId, ...(reported ? { inputSafety: 'reported' } : {}) });
+    recordDecision({ decision: 'pending', client: 'claude', promptHash, source: 'hook', invocationKind: isHarnessMessage(prompt) ? 'harness-message' : 'client-hook', phase: 'turn-start', sessionId: input.session_id, turnId, ...(reported ? { inputSafety: 'reported' } : {}) });
   } catch { /* 監査ログ障害でも候補案内は継続する */ }
   let candidateId;
   try {
@@ -175,4 +189,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { proactiveSignals, proactiveGuidance, proactiveConfidence, recordTurnCandidate, main };
+module.exports = { proactiveSignals, proactiveGuidance, proactiveConfidence, recordTurnCandidate, isHarnessMessage, main };
