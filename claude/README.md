@@ -4,7 +4,7 @@
 
 ## 既定の動作
 
-- SessionStartは短い機能案内だけを表示し、MCPや記憶を読みません。
+- SessionStartは短い機能案内だけを表示し、MCPや記憶を読みません。公開リポジトリに新しい版があれば、起動のたびに GitHub の plugin.json を読み取り専用で確認し、案内は同じ版につき 1 日 1 回だけ出します（失敗時は何も出しません。token・MCP設定は使いません）。
 - `hooks.json` はSessionStartの機能案内に加え、UserPromptSubmitで各ターンの開始時に保持基準とRecall条件の案内を出し、Stopは未処理の候補または安全上の通知があるときだけ案内します（無ければ何も出しません）。機能の選択はAIの判断です。フックは会話本文を自動保存しません。自動Recallは `PRIORS_AUTO_RECALL=1` を明示設定した場合だけで、そのときは高確度の兆候があるプロンプトを検索語としてPriors MCPへ送ります。保存操作が成功した場合はPostToolUseが成功応答の記憶IDと版だけをローカル監査へ記録し、本文は記録しません。
 - 自律Rememberの案内は既定で有効です。既定でもUserPromptSubmitは本文なしの候補（ハッシュ・種別・信頼度）をローカルに記録し、成功した保存の candidate_id か、保存不要と判断したターンの `record-decision.js --decision skip` で解決します。`PRIORS_AUTO_REMEMBER=0` は候補箱モードで、候補は永続保存の代わりになりません。
 - 起動時に記憶を自動読取する機能はありません。`PRIORS_AUTO_RECALL=1` の明示opt-inを除き、AIが必要と判断したときにMCP機能を選びます。

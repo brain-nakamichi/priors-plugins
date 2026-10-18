@@ -2,7 +2,7 @@
 'use strict';
 const { readHookInput } = require('./bounded-input.js');
 const { recordDecision, validSession, activeTurnId } = require('./decision-audit.js');
-const { candidateReceiptForSave } = require('./proactive-candidates.js');
+const { candidateReceiptForSave, acknowledgeProactiveCandidateIds } = require('./proactive-candidates.js');
 const TOOLS = new Set(['remember','amend','capture','work_create','work_event']);
 function parseSaveResponse(input) {
   if (!validSession(input?.session_id) || input.hook_event_name !== 'PostToolUse') return null;
@@ -53,13 +53,21 @@ function postToolSaveObservation(input, env = process.env) {
     save: { outcome: 'recorded', ids: parsed.ids, tool: parsed.name, ...(candidateReceipts.length ? { candidate_receipts: candidateReceipts } : {}) },
   };
 }
+// Resolve the candidates whose server receipt was already validated against this turn.
+// Doing it here, not only at Stop, keeps the receipt when another prompt (for example a
+// background agent's report) starts a new turn before Stop runs and replaces the turn state.
+function recordSaveObservation(observation, env = process.env) {
+  recordDecision({ decision: 'write-candidate', client: 'claude', source: 'hook', invocationKind: 'client-hook', phase: 'tool-save', sessionId: observation.sessionId, turnId: observation.turnId, save: observation.save }, env);
+  const ids = (observation.save.candidate_receipts || []).map((receipt) => receipt.candidate_id);
+  return ids.length ? acknowledgeProactiveCandidateIds(ids, 'write-candidate', env) : 0;
+}
 function main() {
   try {
     const read = readHookInput(0, false); const observation = read.ok && postToolSaveObservation(read.input);
     if (!observation) return;
-    recordDecision({ decision: 'write-candidate', client: 'claude', source: 'hook', invocationKind: 'client-hook', phase: 'tool-save', sessionId: observation.sessionId, turnId: observation.turnId, save: observation.save });
+    recordSaveObservation(observation);
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:'Priors: 成功応答の保存ID・版をローカル監査に記録しました。CLIでの追加記録は不要です。保存済みと報告できるのは、Priorsの成功応答で確認したID・版だけです。'}}));
   } catch { process.stdout.write(JSON.stringify({systemMessage:'Priors: 保存観測を記録できません。終端では従来どおりIDと版を明示してください。'})); }
 }
 if (require.main === module) main();
-module.exports = { savedRefs, parseSaveResponse, postToolSaveObservation };
+module.exports = { savedRefs, parseSaveResponse, postToolSaveObservation, recordSaveObservation };

@@ -223,6 +223,25 @@ test('UserPromptSubmit gives retention and Recall guidance; audit stores only a 
   }
 });
 
+test('Recall の兆候だけのターンは会話終了時の候補を作らず、skip の案内も出さない', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-recall-only-hint-'));
+  try {
+    const env = { ...process.env, PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit.jsonl'),
+      PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidates.jsonl') };
+    delete env.PRIORS_AUTO_REMEMBER;
+    const child = spawnSync(process.execPath, [HOOK], {
+      env, input: JSON.stringify({ prompt: '前回の経緯を確認したい', hook_event_name: 'UserPromptSubmit' }), encoding: 'utf8',
+    });
+    assert.equal(child.status, 0);
+    const context = JSON.parse(child.stdout).hookSpecificOutput.additionalContext;
+    assert.match(context, /recall-likely/);
+    assert.doesNotMatch(context, /record-decision\.js/);
+    assert.doesNotMatch(context, /保存候補ID/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('既定モードでは自律Remember案内を示し、候補は本文なしで記録する', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-default-remember-test-'));
   const candidates = path.join(dir, 'candidates.jsonl');

@@ -15,7 +15,7 @@ const {
 } = require('../hooks/proactive-candidates.js');
 const { reminderPayload } = require('../hooks/conversation-end.js');
 const { recordTurnCandidate, proactiveSignals, proactiveConfidence } = require('../hooks/user-prompt-submit.js');
-const { postToolSaveObservation } = require('../hooks/post-tool-save.js');
+const { postToolSaveObservation, recordSaveObservation } = require('../hooks/post-tool-save.js');
 const { run: runRecordDecision } = require('../hooks/record-decision.js');
 const { run: runAcknowledgeCandidates } = require('../hooks/acknowledge-proactive-candidates.js');
 
@@ -144,6 +144,37 @@ test('D8: actual PostToolUse generic save leaves candidates; explicit resource r
   acknowledgeProactiveCandidateIds(validated.map((item) => item.candidate_id), 'write-candidate', env);
   assert.deepEqual(pendingProactiveCandidates(env).map((item) => item.candidate_id), [old.candidate_id, unrelated.candidate_id]);
   assert.notEqual(reminderPayload({ pendingCandidateCount: 1 }), null, 'legacy/older unresolved candidate remains visible');
+});
+
+test('D8: a validated receipt resolves its candidate at PostToolUse, so a new turn before Stop does not lose it', (t) => {
+  const { env } = fixture(t);
+  const savedTurn = turn(env, SESSION);
+  const saved = candidate(env, savedTurn, 'remember-candidate');
+  const other = candidate(env, savedTurn, 'work-item-candidate');
+  const observation = postToolSaveObservation({
+    session_id: SESSION, hook_event_name: 'PostToolUse', tool_name: 'mcp__priors__remember',
+    tool_input: { candidate_id: saved.candidate_id },
+    tool_response: { operation: 'remember', outcome_code: 'recorded', resource_ids: [{ role: 'primary', id: 'GEN-13', version: 1 }],
+      candidate_receipts: [{ candidate_id: saved.candidate_id, resource_ids: ['GEN-13@1'] }] },
+  }, env);
+  assert.equal(recordSaveObservation(observation, env), 1);
+  // A background agent's report arrives as a new prompt before Stop ran for the saved turn.
+  turn(env, SESSION);
+  assert.deepEqual(pendingProactiveCandidates(env).map((item) => item.candidate_id), [other.candidate_id]);
+});
+
+test('D8: PostToolUse without a matching receipt resolves nothing', (t) => {
+  const { env } = fixture(t);
+  const turnId = turn(env, SESSION);
+  const current = candidate(env, turnId, 'remember-candidate');
+  const observation = postToolSaveObservation({
+    session_id: SESSION, hook_event_name: 'PostToolUse', tool_name: 'mcp__priors__remember',
+    tool_input: { candidate_id: current.candidate_id },
+    tool_response: { operation: 'remember', outcome_code: 'recorded', resource_ids: [{ role: 'primary', id: 'GEN-14', version: 1 }],
+      candidate_receipts: [{ candidate_id: current.candidate_id, resource_ids: ['GEN-99@1'] }] },
+  }, env);
+  assert.equal(recordSaveObservation(observation, env), 0);
+  assert.deepEqual(pendingProactiveCandidates(env).map((item) => item.candidate_id), [current.candidate_id]);
 });
 
 test('D8: explicit save without matching candidate receipt does not clear queue', (t) => {

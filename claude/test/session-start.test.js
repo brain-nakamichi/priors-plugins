@@ -29,6 +29,8 @@ test('SessionStart only advertises optional Priors use and never reads memory', 
       PRIORS_STARTUP_PREVIEW: '1',
       PRIORS_HOOK_TOKEN_V1: 'synthetic-token-that-must-not-be-used',
       PRIORS_MCP_URL: 'http://127.0.0.1:1/mcp',
+      // keep the test hermetic: a non-https URL disables the GitHub update check
+      PRIORS_PLUGIN_UPDATE_URL: 'http://127.0.0.1:1/plugin.json',
     },
     input: JSON.stringify({ cwd: process.cwd(), session_id: 'synthetic-session' }),
     encoding: 'utf8',
@@ -50,4 +52,24 @@ test('selftest documents the read-free hook contract without inspecting credenti
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /does not read memory or connect to MCP/);
   assert.doesNotMatch(result.stdout, /synthetic-token/);
+});
+
+test('SessionStart exits promptly even when the update check cannot connect', () => {
+  const started = Date.now();
+  const result = spawnSync(process.execPath, [SCRIPT], {
+    env: {
+      ...process.env,
+      // an unroutable address that is allowed on purpose, so the fetch hangs until aborted
+      PRIORS_PLUGIN_UPDATE_ALLOWED_HOSTS: '10.255.255.1',
+      PRIORS_PLUGIN_UPDATE_URL: 'https://10.255.255.1/plugin.json',
+      PRIORS_PLUGIN_UPDATE_TIMEOUT_MS: '300',
+    },
+    input: '{}',
+    encoding: 'utf8',
+    timeout: 8000,
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(elapsed < 3000, `SessionStart took ${elapsed} ms`);
+  assert.match(JSON.parse(result.stdout).systemMessage, /自動読取なし/);
 });

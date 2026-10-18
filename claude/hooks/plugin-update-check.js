@@ -67,14 +67,16 @@ async function checkPluginUpdate(env = process.env) {
     if (!res.ok) return null;
     const text = await res.text();
     if (Buffer.byteLength(text, 'utf8') > MAX_BODY) return null;
-    const latest = JSON.parse(text).version;
-    if (!newer(latest, current)) return null;
+    const raw = JSON.parse(text).version;
+    if (!newer(raw, current)) return null;
+    // Only the validated numeric version reaches the model context (never free text after - or +).
+    const latest = parseVersion(raw).join('.');
     const file = statePath(env); const state = readState(file); const now = Date.now();
     const previous = state[CLIENT];
     if (previous && previous.version === latest && now - Number(previous.notifiedAt) < NOTIFY_INTERVAL_MS) return null;
     state[CLIENT] = { version: latest, notifiedAt: now };
     writeState(file, state);
-    return `Priorsプラグインに更新があります（Claude: ${current} → ${latest}）。「claude plugin update priors@priors」を実行し、更新元が古い場合は公式marketplaceを再登録してからClaude Codeを再起動してください。token・MCP設定は変更しません。`;
+    return `Priorsプラグインに更新があります（Claude: ${current} → ${latest}）。利用者が更新を選ぶ場合は「claude plugin marketplace update priors」→「claude plugin update priors@priors -s user」の順に実行し、Claude Codeを再起動します。removeや再登録、token・MCP設定の変更は行いません。`;
   } catch { return null; }
   finally { clearTimeout(timer); }
 }
