@@ -323,7 +323,9 @@ function confirmRememberCandidate(candidateId, input = {}, env = process.env) {
     || typeof input.body !== 'string' || input.body.length < 1
     || typeof input.idempotency_key !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(input.idempotency_key)
     || (input.tags !== undefined && (!Array.isArray(input.tags) || input.tags.some((tag) => typeof tag !== 'string')))
-    || (input.evidence !== undefined && (!Array.isArray(input.evidence) || input.evidence.some((item) => !item || typeof item !== 'object')))) {
+    // The evidence write path is retired (server: invalid_input / evidence_deprecated). Only an empty array / null is
+    // tolerated (same as the server); provenance goes to refs.observations.
+    || (input.evidence !== undefined && input.evidence !== null && (!Array.isArray(input.evidence) || input.evidence.length > 0))) {
     return { ok: false, error: 'invalid_payload' };
   }
   const file = candidatePath(env);

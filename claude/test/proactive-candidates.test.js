@@ -212,7 +212,8 @@ test('Remember候補はレビュー済みpayloadを明示確認してからremem
     const payload = {
       namespace: 'GEN', kind: 'decision', memory_type: 'semantic',
       title: 'レビュー済み決定', body: '会話から人間が確認した内容',
-      idempotency_key: 'remember-confirm-1', evidence: [{ type: 'conversation_hash', sha256: '3'.repeat(64) }],
+      idempotency_key: 'remember-confirm-1',
+      refs: { observations: [{ kind: 'reported', claim: '会話から人間が確認した' }] },
     };
     const confirmed = confirmRememberCandidate(result.candidate.candidate_id, payload, env);
     assert.equal(confirmed.ok, true);
@@ -224,6 +225,10 @@ test('Remember候補はレビュー済みpayloadを明示確認してからremem
     assert.doesNotMatch(stored, /レビュー済み決定|会話から人間/);
     assert.equal(confirmRememberCandidate(result.candidate.candidate_id, payload, env).error, 'candidate_not_pending');
     assert.equal(confirmRememberCandidate(result.candidate.candidate_id, { ...payload, body: '' }, env).error, 'invalid_payload');
+    // evidence write is retired: non-empty is refused as invalid_payload (checked before the pending state)
+    assert.equal(confirmRememberCandidate(result.candidate.candidate_id, { ...payload, evidence: [{ source_event_id: 'x' }] }, env).error, 'invalid_payload');
+    // null is tolerated like the server: validation passes, so the (already confirmed) candidate is what stops it
+    assert.equal(confirmRememberCandidate(result.candidate.candidate_id, { ...payload, evidence: null }, env).error, 'candidate_not_pending');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
