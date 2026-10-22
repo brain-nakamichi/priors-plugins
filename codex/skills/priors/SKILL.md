@@ -34,6 +34,8 @@ Before long work (changes across several files, production operations, or work t
 
 Write one memory per subject. Keep deployment/work reports short and link subject memories with `relates_to`; do not dilute an existing memory by adding another subject.
 
+When a decision, rule, or rejected proposal says "do not do X", put X in `rejected_actions` (`{action, reason}`). `guard` matches only the rejected action text and the title, not a "do not" sentence in the body. Write `action` in the words a future plan would use (in Japanese for Japanese themes; if you use an identifier, add a Japanese paraphrase).
+
 ## Authorization and error handling
 
 Only a memory's owner can directly edit, retract, supersede, pin, split, merge, or resolve it. Another client kind (Claude/Codex) is a different owner even for the same person; a human request does not grant cross-client write permission, and an AI cannot change a human-protected memory. On `forbidden` / SQLSTATE `42501`, do not retry as owner or seek a delegation. For `other_client`, leave your own memory instead (`dispute`, or an `amends` / `refutes` / `supports` / `answers` link); only the owner changes the source memory. If the server returns an authorization or infrastructure error, report the failure and continue without inventing a result.
