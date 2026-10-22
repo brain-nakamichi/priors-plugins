@@ -36,6 +36,10 @@ const SAVE_OUTCOMES = new Set(['recorded', 'failed', 'not_needed']);
 const SAVE_ID = /^[A-Za-z0-9_:@.-]{1,80}$/;
 const TURN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CANDIDATE_ID = /^pc-[0-9a-f]{12}(?:-[0-9a-f]{8})?-[a-z-]{1,120}$/i;
+// The Priors tools whose success response can carry candidate_receipts. The subtheme memory writes (SQL351) return
+// "<item UUID>@<version>" as the saved reference; the others return "<short ID>@<version>".
+const SUBTHEME_SAVE_TOOLS = ['subtheme_memory_add', 'subtheme_memory_append', 'subtheme_memory_revise', 'subtheme_memory_replace'];
+const SAVE_TOOLS = ['remember', 'amend', 'capture', 'work_create', 'work_event', ...SUBTHEME_SAVE_TOOLS];
 function normalizeSave(save) {
   if (save === undefined || save === null) return undefined;
   if (typeof save !== 'object') throw new Error('invalid save');
@@ -52,7 +56,7 @@ function normalizeSave(save) {
       || receipt.resource_ids.some((id) => typeof id !== 'string' || !SAVE_ID.test(id) || !ids.includes(id))) throw new Error('invalid candidate receipt');
   }
   const tool = save.tool;
-  if (tool !== undefined && !['remember', 'amend', 'capture', 'work_create', 'work_event'].includes(tool)) throw new Error('invalid save tool');
+  if (tool !== undefined && !SAVE_TOOLS.includes(tool)) throw new Error('invalid save tool');
   return { outcome: save.outcome, ids, ...(tool ? { tool } : {}),
     ...(candidateReceipts.length ? { candidate_receipts: candidateReceipts.map((receipt) => ({ candidate_id: receipt.candidate_id, resource_ids: [...new Set(receipt.resource_ids)] })) } : {}),
   };
@@ -357,7 +361,7 @@ function observedSaves(sessionId, client, env = process.env) {
   if (!found || !ids.size) throw new Error('manual_references_required');
   return [...ids];
 }
-module.exports = { validSession, observedSaves, activeTurnId, currentTurnAudit,
+module.exports = { validSession, observedSaves, activeTurnId, currentTurnAudit, SAVE_TOOLS, SUBTHEME_SAVE_TOOLS,
   DECISIONS, PHASES, auditPath, stopDiagnosticPath, turnStatePath, hashPrompt,
   recordDecision, recordStopInvocation, lastAuditEvent, auditHealth,
   inputSafetySummary, inputSafetyGuidance,

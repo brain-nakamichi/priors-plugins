@@ -36,7 +36,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^mcp__priors__(remember|amend|capture|work_create|work_event)$",
+        "matcher": "^mcp__priors__(remember|amend|capture|work_create|work_event|subtheme_memory_add|subtheme_memory_append|subtheme_memory_revise|subtheme_memory_replace)$",
         "hooks": [
           {
             "type": "command",

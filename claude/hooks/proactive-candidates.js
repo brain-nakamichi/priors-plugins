@@ -139,7 +139,7 @@ function acknowledgeProactiveCandidates(decision, env = process.env, turnId) {
 // Accept only explicit candidate→saved-reference mappings from a successful
 // tool response. A generic same-turn save is never enough to clear a cue.
 function candidateReceiptForSave(turnId, tool, receipts, savedIds, env = process.env) {
-  if (!TURN_ID.test(turnId || '') || !['remember', 'amend', 'capture', 'work_create', 'work_event'].includes(tool)) return [];
+  if (!TURN_ID.test(turnId || '') || !require('./decision-audit.js').SAVE_TOOLS.includes(tool)) return [];
   if (!Array.isArray(receipts) || !Array.isArray(savedIds)) return [];
   const pending = new Set(pendingProactiveCandidates(env).filter((event) => event.turn_id === turnId).map((event) => event.candidate_id));
   return receipts.filter((receipt) => receipt && pending.has(receipt.candidate_id)
