@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "priors marketplace",
-    "version": "0.1.49"
+    "version": "0.1.50"
   },
   "plugins": [
     {
       "name": "priors",
       "description": "重要情報を保持し、関連する過去情報を適時にRecallする記憶支援プラグイン",
-      "version": "0.1.49",
+      "version": "0.1.50",
       "author": {
         "name": "brain"
       },
