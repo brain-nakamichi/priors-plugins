@@ -79,6 +79,29 @@ test('conversation end reminds about pending candidates only', () => {
   }
 });
 
+test('earlier turns\' pending candidates are not re-announced every turn (87126666)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-end-scoped-'));
+  const candidates = path.join(dir, 'candidates.jsonl');
+  try {
+    fs.writeFileSync(candidates, JSON.stringify({ schema: 'priors.proactive-candidate.v1', recorded_at: new Date().toISOString(),
+      prompt_sha256: 'c'.repeat(64), categories: ['remember-candidate'], source: 'local-heuristic', confidence: 'low',
+      candidate_id: 'pc-' + 'c'.repeat(12) + '-old-remember-candidate', turn_id: '11111111-1111-4111-8111-111111111111' }) + '\n');
+    const env = { ...process.env, PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit.jsonl'), PRIORS_STOP_DIAGNOSTIC_FILE: path.join(dir, 'stop.jsonl'), PRIORS_PROACTIVE_CANDIDATE_FILE: candidates };
+    delete env.PRIORS_AUTO_REMEMBER;
+    const child = spawnSync(process.execPath, [HOOK], { env, input: '{}', encoding: 'utf8' });
+    assert.equal(child.status, 0);
+    assert.equal(child.stdout, '');
+    // the candidate itself is left untouched (it still expires by age)
+    assert.doesNotMatch(fs.readFileSync(candidates, 'utf8'), /reviewed_at/);
+    const { summarizeProactiveCandidates } = require('../hooks/proactive-candidates.js');
+    assert.equal(summarizeProactiveCandidates(env).total, 1);
+    assert.equal(summarizeProactiveCandidates(env, { turnId: '11111111-1111-4111-8111-111111111111' }).total, 1);
+    assert.equal(summarizeProactiveCandidates(env, { turnId: '22222222-2222-4222-8222-222222222222' }).total, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('未設定の通常ターンは自律Remember候補を作らずStopも無言', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-auto-remember-end-'));
   const file = path.join(dir, 'candidates.jsonl');

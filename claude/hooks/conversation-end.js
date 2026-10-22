@@ -29,7 +29,7 @@ function candidateGuidance(summary) {
 
 function reminderPayload({ pendingCandidateCount, safetyGuidance = '', invalidLines = 0, invalidLinesChanged = false }) {
   const lines = [];
-  if (pendingCandidateCount > 0) lines.push(`未処理候補 ${pendingCandidateCount} 件。今回に関係し保持基準に合うものだけ確認し、保存した場合は成功応答のID・版を確かめてください。`);
+  if (pendingCandidateCount > 0) lines.push(`今回のターンの未処理候補 ${pendingCandidateCount} 件。保持基準に合うものだけ確認し、保存した場合は成功応答のID・版を確かめてください。`);
   if (safetyGuidance) lines.push(safetyGuidance);
   if (invalidLinesChanged && invalidLines > 0) lines.push(`ローカル監査ログの形式不正行が ${invalidLines} 件あります（状態が変わった時だけ通知）。`);
   if (lines.length === 0) return null;
@@ -58,27 +58,22 @@ try {
     try { materializeWorkItemCandidate(); } catch { /* candidate generation is best effort */ }
     try { materializeCheckpointCandidate(); } catch { /* candidate generation is best effort */ }
   }
-  const candidateSummary = summarizeProactiveCandidates();
   const health = auditHealth();
-  let turnState = currentTurnAudit(input.session_id, 'claude');
-  let acknowledgedDecisionCandidates = false;
+  const turnState = currentTurnAudit(input.session_id, 'claude');
   // An explicit decision resolves only heuristic candidates attached to this
   // exact prompt turn. A legacy/unscoped queue is intentionally preserved.
   if (turnState.turn_id && turnState.decision?.decision === 'skip') {
-    acknowledgedDecisionCandidates = acknowledgeProactiveCandidates(turnState.decision.decision, process.env, turnState.turn_id) > 0;
+    acknowledgeProactiveCandidates(turnState.decision.decision, process.env, turnState.turn_id);
   }
   // Only IDs explicitly bound to this same prompt turn by PostToolUse can
   // resolve candidate records. A session-level save never clears older work.
-  let acknowledgedSaveCandidates = false;
   for (const save of turnState.saves || []) {
     const receipts = candidateReceiptForSave(turnState.turn_id, save.save?.tool, save.save?.candidate_receipts, save.save?.ids);
-    if (receipts.length) {
-      acknowledgedSaveCandidates = acknowledgeProactiveCandidateIds(receipts.map((receipt) => receipt.candidate_id), 'write-candidate') > 0 || acknowledgedSaveCandidates;
-    }
+    if (receipts.length) acknowledgeProactiveCandidateIds(receipts.map((receipt) => receipt.candidate_id), 'write-candidate');
   }
-  const refreshedSummary = acknowledgedDecisionCandidates || acknowledgedSaveCandidates
-    ? summarizeProactiveCandidates()
-    : candidateSummary;
+  // Remind only about this turn's candidates (and unscoped legacy ones); earlier turns' leftovers are not
+  // re-announced every turn (87126666).
+  const refreshedSummary = summarizeProactiveCandidates(process.env, { turnId: turnState.turn_id });
   const rememberReady = pendingRememberCandidates().length;
   const workReady = pendingWorkItemCandidates().length;
   const checkpointReady = pendingCheckpointCandidates().length;

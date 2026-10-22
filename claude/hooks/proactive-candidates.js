@@ -510,9 +510,14 @@ function prepareWorkEvent(candidateId, workId, input = {}, env = process.env) {
   };
 }
 
-function summarizeProactiveCandidates(env = process.env) {
+// With opts.turnId, only that turn's candidates and unscoped (legacy) ones are counted: candidates left from
+// earlier turns are not repeated every turn, so the reminder does not become a number the AI learns to ignore
+// (87126666). They still expire after MAX_AGE_MS.
+function summarizeProactiveCandidates(env = process.env, opts = {}) {
   const summary = { total: 0, high_confidence: 0, categories: { 'recall-likely': 0, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 } };
+  const scoped = Object.hasOwn(opts, 'turnId');
   for (const event of pendingProactiveCandidates(env)) {
+    if (scoped && event.turn_id && event.turn_id !== opts.turnId) continue;
     summary.total += 1;
     if (event.confidence === 'high') summary.high_confidence += 1;
     for (const category of event.categories || []) {

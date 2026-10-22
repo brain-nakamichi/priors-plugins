@@ -87,7 +87,10 @@ test('both skills name concrete moments to recall and let the AI maintain subthe
   assert.match(codexBody, /does not replace checking the actual artifact/);
   // the permission comes with its guardrails: ownership scope, soft_delete only, erase only on request
   assert.match(body, /利用者の事前の許可なく行い、行ったことを報告してよい範囲（所有権・安全の条件は変わらない/);
-  assert.match(body, /自分（このクライアント）が作成したと会話や記憶で確認できるサブテーマ、または personal テーマ（別のクライアントが作成したと分かっているものは除く）/);
+  // personal themes include subthemes with no recorded creator (null), which is most of the old ones (87126666)
+  assert.match(body, /\(a\) personal テーマ（`theme_list` の audience が personal）のサブテーマ — 作成者が記録されていない（null の）ものも含む。別のクライアントが作成したと分かっているものだけ除く/);
+  assert.match(body, /\(b\) 自分（このクライアント）が作成したと会話や記憶で確認できるサブテーマ/);
+  assert.match(codexBody, /including subthemes whose creator is not recorded \(null\), except subthemes known to be created by another client/);
   assert.match(body, /改訂・削除の案を報告して確認を待つ/);
   assert.match(body, /削除は `soft_delete`（`restore` で戻せる）だけ。消去（`erase_\*`）は利用者が明示的に依頼したときだけ/);
   assert.match(body, /親テーマの解決済み記憶の削除は禁止/);
