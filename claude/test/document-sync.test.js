@@ -9,8 +9,175 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'document-sync.js');
-const { classify } = require(SCRIPT);
+const { classify, normalizeLf, repoPath, auditManifest } = require(SCRIPT);
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+
+test('Claude and Codex plugin package versions and audit scripts stay aligned', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const versions = [
+    require(path.join(root, 'plugin/package.json')).version,
+    require(path.join(root, 'plugin/.claude-plugin/plugin.json')).version,
+    require(path.join(root, 'plugin/.claude-plugin/marketplace.json')).metadata.version,
+    require(path.join(root, 'plugin/.claude-plugin/marketplace.json')).plugins[0].version,
+    require(path.join(root, 'codex-plugins/priors/plugin.json')).version,
+    require(path.join(root, 'codex-plugins/priors/.codex-plugin/plugin.json')).version,
+    require(path.join(root, 'codex-plugins/marketplace.json')).plugins[0].version,
+    require(path.join(root, 'codex-plugins/marketplace.json')).metadata.version,
+    require(path.join(root, 'codex-plugins/marketplace.json')).version,
+  ];
+  assert.deepEqual(versions, Array(9).fill('0.1.53'));
+  assert.equal(fs.readFileSync(path.join(root, 'plugin/scripts/document-sync.js'), 'utf8'),
+    fs.readFileSync(path.join(root, 'codex-plugins/priors/scripts/document-sync.js'), 'utf8'));
+});
+
+test('audit helpers normalize only CRLF and reject unsafe repository paths', () => {
+  assert.deepEqual(normalizeLf(Buffer.from('a\r\nb\n')), Buffer.from('a\nb\n'));
+  assert.deepEqual(normalizeLf(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('a\r\n')])), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('a\n')]));
+  assert.throws(() => normalizeLf(Buffer.from([0xff])), /encoded data/i);
+  const root = path.resolve('repo-root');
+  assert.equal(repoPath(root, 'docs/a.md'), path.join(root, 'docs', 'a.md'));
+  for (const unsafe of ['../secret', '/outside', 'a\\..\\secret', 'a//b']) assert.throws(() => repoPath(root, unsafe));
+});
+
+async function auditFixture(t, row = { theme: 'GEN', document_id: '432c36d9-37cc-4f9f-853d-693a56401a21', path: 'docs/a.md' }) {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'priors-audit-'));
+  t.after(() => fs.promises.rm(dir, { recursive: true, force: true }));
+  const repo = path.join(dir, 'repo'); await fs.promises.mkdir(path.join(repo, 'docs'), { recursive: true });
+  await fs.promises.writeFile(path.join(repo, 'docs', 'a.md'), 'worktree');
+  const manifest = path.join(dir, 'manifest.json');
+  await fs.promises.writeFile(manifest, JSON.stringify({ version: 1, repo: 'priors', documents: [row] }));
+  const commit = 'a'.repeat(40), body = Buffer.from('same\r\nbody\n');
+  const calls = [];
+  const deps = {
+    git: (_root, ...args) => args[0] === 'rev-parse' && args.includes('--show-toplevel') ? repo : commit,
+    gitFile: async () => body,
+    tool: async (_name, args) => {
+      calls.push(args);
+      if (args.action === 'audit_read') return { version: 7, sha256: sha(body), binding_generation: 2, observation_generation: 3 };
+      return { audit: args.audit };
+    },
+    download: async () => ({ bytes: body, sha256: sha(body), version: 7 }),
+  };
+  return { dir, repo, manifest, commit, body, calls, deps };
+}
+
+test('audit records raw matches and content differences using the read CAS tuple', async (t) => {
+  const f = await auditFixture(t);
+  const matched = await auditManifest(f.manifest, f.repo, 'main', 'branch', f.deps);
+  assert.equal(matched.results[0].status, 'matched');
+  assert.equal(f.calls[1].expected_version, 7);
+  assert.equal(f.calls[1].expected_binding_generation, 2);
+  assert.equal(f.calls[1].audit.evidence, 'raw_sha256_match');
+  f.deps.gitFile = async () => Buffer.from('same\nbody\n');
+  const normalized = await auditManifest(f.manifest, f.repo, 'main', 'branch', f.deps);
+  assert.equal(normalized.results[0].status, 'matched');
+  assert.equal(f.calls.at(-1).audit.comparison_profile, 'utf8-crlf-lf-v1');
+  assert.equal(f.calls.at(-1).audit.evidence, 'newline_normalized_match');
+  f.deps.gitFile = async () => Buffer.from('repo different');
+  const changed = await auditManifest(f.manifest, f.repo, 'main', 'branch', f.deps);
+  assert.equal(changed.results[0].status, 'different');
+  assert.equal(f.calls.at(-1).audit.evidence, 'content_sha256_differs');
+});
+
+test('audit records missing sources as unknown, but never writes after a failed remote read or stale CAS', async (t) => {
+  const f = await auditFixture(t, { theme: 'GEN', document_id: '432c36d9-37cc-4f9f-853d-693a56401a21', path: null });
+  await auditManifest(f.manifest, f.repo, 'main', 'branch', f.deps);
+  assert.equal(f.calls[1].audit.status, 'unknown');
+  assert.equal(f.calls[1].audit.source, null);
+
+  const missing = await auditFixture(t);
+  missing.deps.gitFile = async () => { throw new Error('not present in ref'); };
+  await auditManifest(missing.manifest, missing.repo, 'main', 'branch', missing.deps);
+  assert.equal(missing.calls.at(-1).audit.status, 'unknown');
+  assert.equal(missing.calls.at(-1).audit.source.path, 'docs/a.md');
+  assert.equal(missing.calls.at(-1).audit.source.sha256, null);
+
+  const g = await auditFixture(t);
+  g.deps.download = async () => { throw Object.assign(new Error('offline'), { code: 'document_http_503' }); };
+  await assert.rejects(auditManifest(g.manifest, g.repo, 'main', 'branch', g.deps), /offline/);
+  assert.equal(g.calls.filter((c) => c.action === 'audit_record').length, 0);
+
+  const wrongSnapshot = await auditFixture(t);
+  wrongSnapshot.deps.download = async () => ({ bytes: wrongSnapshot.body, sha256: 'b'.repeat(64), version: 7 });
+  await assert.rejects(auditManifest(wrongSnapshot.manifest, wrongSnapshot.repo, 'main', 'branch', wrongSnapshot.deps), /audit_remote_snapshot_changed/);
+  assert.equal(wrongSnapshot.calls.filter((c) => c.action === 'audit_record').length, 0);
+
+  const lost = await auditFixture(t);
+  lost.deps.tool = async (_name, args) => {
+    lost.calls.push(args);
+    if (args.action === 'audit_read') return { version: 7, sha256: sha(lost.body), binding_generation: 2, observation_generation: 3 };
+    throw new TypeError('connection closed');
+  };
+  await assert.rejects(auditManifest(lost.manifest, lost.repo, 'main', 'branch', lost.deps), (e) => e.code === 'audit_result_unknown');
+
+  const h = await auditFixture(t);
+  h.deps.tool = async (_name, args) => {
+    h.calls.push(args);
+    if (args.action === 'audit_read') return { version: 7, sha256: sha(h.body), binding_generation: 2, observation_generation: 3 };
+    throw Object.assign(new Error('stale'), { code: 'version_conflict' });
+  };
+  await assert.rejects(auditManifest(h.manifest, h.repo, 'main', 'branch', h.deps), /stale/);
+});
+
+test('audit stops safely when the server has no audit_read capability', async (t) => {
+  const f = await auditFixture(t);
+  f.deps.tool = async (_name, args) => {
+    f.calls.push(args);
+    throw Object.assign(new Error('unsupported_action'), { code: 'invalid_input' });
+  };
+  await assert.rejects(auditManifest(f.manifest, f.repo, 'main', 'branch', f.deps), /unsupported_action/);
+  assert.equal(f.calls.some((c) => c.action === 'audit_record'), false);
+});
+
+test('audit refuses a worktree file changed during the two SHA checks', async (t) => {
+  const f = await auditFixture(t);
+  let reads = 0;
+  f.deps.readFile = async () => Buffer.from(++reads === 1 ? 'before' : 'after');
+  await assert.rejects(auditManifest(f.manifest, f.repo, 'HEAD', 'worktree', f.deps), /worktree_changed_during_audit/);
+  assert.equal(f.calls.filter((c) => c.action === 'audit_record').length, 0);
+});
+
+test('manifest initial status stays tied to its exact document and source tuple, including pathless historical rows', async (t) => {
+  const f = await auditFixture(t);
+  const mk = (status, overrides = {}) => ({ theme: 'GEN', document_id: crypto.randomUUID(), path: null,
+    initial: { version: 7, sha256: sha(f.body), status, source_sha256: null, source_commit: f.commit,
+      checked_at: '2026-10-23T00:00:00Z', evidence: 'phase1_review', comparison_profile: 'utf8-crlf-lf-v1', ...overrides } });
+  const rows = [mk('unknown'), mk('historical'), mk('historical', { source_commit: 'b'.repeat(40) })];
+  await fs.promises.writeFile(f.manifest, JSON.stringify({ version: 1, repo: 'priors', documents: rows }));
+  const result = await auditManifest(f.manifest, f.repo, 'main', 'branch', f.deps);
+  assert.deepEqual(result.results.map((r) => r.status), ['unknown', 'historical', 'unknown']);
+  assert.deepEqual(f.calls.filter((c) => c.action === 'audit_record').map((c) => c.audit.evidence), ['phase1_review', 'phase1_review', 'phase1_review']);
+});
+
+test('the 24-row initial manifest is accepted by the audit path and preserves only exact pathless observations', async () => {
+  const manifestFile = path.resolve(__dirname, '../../docs/document-audit-initial-20261023.json');
+  const manifest = JSON.parse(await fs.promises.readFile(manifestFile, 'utf8'));
+  assert.equal(manifest.documents.length, 24);
+  const repo = path.resolve(__dirname, '../../..');
+  const commit = manifest.documents[0].initial.source_commit;
+  const records = [];
+  const deps = {
+    git: (_root, ...args) => args.includes('--show-toplevel') ? repo : commit,
+    gitFile: async (_root, _commit, p) => Buffer.from(`checked ${p}`),
+    tool: async (_name, args) => {
+      if (args.action === 'audit_read') {
+        const row = manifest.documents.find((r) => r.document_id === args.document_id);
+        return { version: row.initial.version, sha256: row.initial.sha256, binding_generation: 2, observation_generation: 4 };
+      }
+      records.push(args); return { audit: args.audit };
+    },
+    download: async (_theme, id) => {
+      const row = manifest.documents.find((r) => r.document_id === id);
+      return { bytes: Buffer.from('verified remote snapshot'), sha256: row.initial.sha256, version: row.initial.version };
+    },
+  };
+  const result = await auditManifest(manifestFile, repo, manifest.ref, 'branch', deps);
+  assert.equal(result.audited, 24);
+  const d20 = records.find((r) => manifest.documents.find((m) => m.audit_id === 'D20')?.document_id === r.document_id);
+  assert.equal(d20.audit.status, 'historical');
+  assert.equal(d20.audit.source, null);
+  assert.ok(records.filter((r) => manifest.documents.find((m) => m.document_id === r.document_id)?.path).every((r) => r.audit.status === 'unknown'));
+});
 
 function fakePriors() {
   const docs = new Map(); // id -> { key, versions: [{bytes, sha}] }

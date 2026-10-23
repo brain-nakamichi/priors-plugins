@@ -18,6 +18,7 @@ const fsp = fs.promises;
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 
 const INLINE_LIMIT = 128 * 1024;
 const MAX_BYTES = 1048576;
@@ -355,6 +356,119 @@ async function fetchDoc(p, opts) {
   });
 }
 
+function normalizeLf(bytes) {
+  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  return Buffer.from(text.replace(/\r\n/g, '\n'), 'utf8');
+}
+function git(repo, ...args) { return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+function repoPath(root, p) {
+  if (typeof p !== 'string' || !p || path.isAbsolute(p) || /^[A-Za-z]:/.test(p) || p.includes(':') || p.includes('\\') || p.split('/').some((x) => !x || x === '.' || x === '..' || x === '~') || /[\x00-\x1f\x7f]/.test(p)) fail('invalid_manifest_path');
+  const abs = path.resolve(root, ...p.split('/'));
+  const rel = path.relative(root, abs);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) fail('invalid_manifest_path');
+  return abs;
+}
+async function auditManifest(manifestFile, repoArg, ref, sourceMode = 'branch', deps = {}) {
+  const repo = fs.realpathSync(path.resolve(repoArg));
+  const runGit = deps.git || git;
+  const readFile = deps.readFile || fsp.readFile;
+  const callTool = deps.tool || tool;
+  const getDownload = deps.download || download;
+  const getGitFile = deps.gitFile || ((r, commit, p) => Buffer.from(execFileSync('git', ['-C', r, 'show', `${commit}:${p}`])));
+  const top = path.resolve(runGit(repo, 'rev-parse', '--show-toplevel'));
+  if (!fs.statSync(repo).isDirectory() || (process.platform === 'win32' ? top.toLowerCase() !== repo.toLowerCase() : top !== repo)) fail('repo_root_required');
+  if (!['branch', 'commit', 'worktree'].includes(sourceMode)) fail('invalid_source_mode');
+  if (!ref || !/^[A-Za-z0-9._/-]{1,160}$/.test(ref) || ref.startsWith('/') || ref.includes('//') || ref.split('/').some((p) => p === '.' || p === '..')) fail('invalid_ref');
+  if (sourceMode === 'commit' && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(ref)) fail('commit_mode_requires_oid');
+  if (sourceMode === 'worktree' && ref !== 'HEAD') fail('worktree_ref_must_be_HEAD');
+  const manifest = JSON.parse(await fsp.readFile(path.resolve(manifestFile), 'utf8'));
+  if (manifest.version !== 1 || !Array.isArray(manifest.documents) || typeof manifest.repo !== 'string' || !/^[A-Za-z0-9_.-]{1,100}$/.test(manifest.repo)) fail('invalid_manifest');
+  const out = [];
+  for (const row of manifest.documents) {
+    if (!row || typeof row.theme !== 'string' || typeof row.document_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(row.document_id)) fail('invalid_manifest');
+    const snapshot = await callTool('document', { action: 'audit_read', theme: row.theme, document_id: row.document_id });
+    const expect = { expected_version: Number(snapshot.version), expected_sha256: snapshot.sha256,
+      expected_binding_generation: Number(snapshot.binding_generation), expected_observation_generation: Number(snapshot.observation_generation) };
+    let status = 'unknown', profile = 'raw-v1', source = null, evidence = 'source_unavailable';
+    let worktreePath = null, worktreeHash = null;
+    let sourceBytes = null, sourceCommit = null;
+    let sourceSha = null;
+    if (!row.path) {
+      try {
+        sourceCommit = sourceMode === 'worktree'
+          ? runGit(repo, 'rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}')
+          : runGit(repo, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`);
+        if (sourceMode === 'commit' && sourceCommit !== ref) fail('invalid_ref');
+      } catch { evidence = 'source_unavailable'; }
+    }
+    if (row.path) {
+      const abs = repoPath(repo, row.path);
+      source = { repo: manifest.repo, path: row.path, mode: sourceMode, ref, commit: null, sha256: null };
+      // Refuse a symlink or junction at any path segment, including a target outside the repository.
+      let cur = repo;
+      for (const part of row.path.split('/')) {
+        cur = path.join(cur, part);
+        try { if (fs.lstatSync(cur).isSymbolicLink()) fail('symlink_refused'); } catch (e) { if (e.code === 'symlink_refused') throw e; break; }
+      }
+      try {
+        if (sourceMode === 'worktree') {
+          sourceCommit = runGit(repo, 'rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}');
+          source.commit = sourceCommit;
+          const before = await readFile(abs); const beforeSha = sha256(before);
+          sourceBytes = before;
+          if (sha256(await readFile(abs)) !== beforeSha) fail('worktree_changed_during_audit');
+          worktreePath = abs; worktreeHash = beforeSha;
+        } else {
+          sourceCommit = runGit(repo, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`);
+          if (sourceMode === 'commit' && sourceCommit !== ref) fail('invalid_ref');
+          source.commit = sourceCommit;
+          sourceBytes = Buffer.from(await getGitFile(repo, sourceCommit, row.path));
+        }
+      } catch (e) {
+        if (e.code === 'worktree_changed_during_audit') throw e;
+        sourceBytes = null; evidence = 'source_unavailable';
+      }
+    }
+    // A network / server read failure must abort before audit_record, leaving the prior observation intact.
+    if (sourceBytes !== null) {
+      const localSha = sha256(sourceBytes);
+      sourceSha = localSha;
+      const remote = await getDownload(row.theme, row.document_id, expect.expected_version);
+      if (remote.version !== expect.expected_version || remote.sha256 !== expect.expected_sha256) fail('audit_remote_snapshot_changed');
+      if (localSha === remote.sha256) { status = 'matched'; evidence = 'raw_sha256_match'; }
+      else {
+        let sameNormalized = false;
+        try { sameNormalized = sha256(normalizeLf(sourceBytes)) === sha256(normalizeLf(remote.bytes)); } catch { /* invalid UTF-8 cannot use the normalization profile */ }
+        if (sameNormalized) { status = 'matched'; profile = 'utf8-crlf-lf-v1'; evidence = 'newline_normalized_match'; }
+        else { status = 'different'; evidence = 'content_sha256_differs'; }
+      }
+      source = { repo: manifest.repo, path: row.path, mode: sourceMode, ref, commit: sourceCommit, sha256: localSha };
+    }
+    const initial = row.initial;
+    if (initial) {
+      const tupleMatches = Number(initial.version) === expect.expected_version && initial.sha256 === expect.expected_sha256
+        && initial.source_sha256 === sourceSha && initial.source_commit === sourceCommit && (!row.path || sourceBytes !== null);
+      status = tupleMatches && ['matched', 'different', 'unknown', 'historical'].includes(initial.status) ? initial.status : 'unknown';
+      evidence = row.path && sourceBytes === null ? 'source_unavailable' : 'phase1_review';
+      if (['raw-v1', 'utf8-crlf-lf-v1'].includes(initial.comparison_profile)) profile = initial.comparison_profile;
+      // Initial classifications are evidence only for their exact version, source bytes, and commit.
+      // In particular, an initial unknown is not upgraded by a later byte comparison.
+    }
+    const audit = { status, source, comparison_profile: profile, checked_at: new Date().toISOString(), evidence };
+    if (worktreePath && sha256(await readFile(worktreePath)) !== worktreeHash) fail('worktree_changed_during_audit');
+    try {
+      const result = await callTool('document', { action: 'audit_record', theme: row.theme, document_id: row.document_id, ...expect, audit });
+      out.push({ document_id: row.document_id, status, result });
+    } catch (error) {
+      // Network failure never changes the persisted server observation.
+      if (error?.name === 'TypeError' || /^mcp_http_5/.test(error?.code || '')) fail('audit_result_unknown', { document_id: row.document_id,
+        note: 'the server may or may not have recorded the result; read audit_read before retrying' });
+      throw error;
+    }
+  }
+  return { audited: out.length, results: out };
+}
+
 function parse(argv) {
   const [cmd, file, ...rest] = argv; const o = {};
   for (let i = 0; i < rest.length; i += 2) {
@@ -365,6 +479,12 @@ function parse(argv) {
   return { cmd, file, o };
 }
 async function main(argv) {
+  if (argv[0] === 'audit') {
+    const opts = {}; for (let i = 1; i < argv.length; i += 2) { const k = argv[i], v = argv[i + 1];
+      if (!['--manifest', '--repo', '--ref', '--source-mode'].includes(k) || v === undefined) fail('usage'); opts[k.slice(2)] = v; }
+    if (!opts.manifest || !opts.repo || !opts.ref) fail('usage');
+    return auditManifest(opts.manifest, opts.repo, opts.ref, opts['source-mode'] || 'branch');
+  }
   const { cmd, file, o } = parse(argv);
   if (!file) fail('usage');
   if (cmd === 'status') return status(file);
@@ -372,7 +492,7 @@ async function main(argv) {
   if (cmd === 'fetch') return fetchDoc(file, o);
   fail('usage');
 }
-module.exports = { classify, safePath, sha256, replaceWithoutLoss };
+module.exports = { classify, safePath, sha256, replaceWithoutLoss, normalizeLf, repoPath, auditManifest };
 if (require.main === module) {
   main(process.argv.slice(2)).then((v) => process.stdout.write(JSON.stringify(v) + '\n'))
     .catch((e) => { process.stderr.write(JSON.stringify({ error: e.code || 'document_sync_failed', ...(e.extra || {}) }) + '\n'); process.exitCode = 1; });

@@ -30,4 +30,6 @@ SessionStartは機能の存在を短く案内するだけで、設定・token・
 
 ## 互換CLI
 
+手動の文書監査は [`docs/document-audit.md`](../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.53）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。
+
 `hooks/` に旧候補処理や監査CLIが残る場合がありますが、既定hookからは呼びません。例外として `record-decision.js --decision skip --phase conversation-end --turn-id <turn_id>` は、保存不要と判断したターンの候補を解決する任意の手段です。特定の手動作業で必要な場合だけ、そのCLIの個別説明を確認してください。現行の自発利用契約や必須の終端手順として扱わないでください。
