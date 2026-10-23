@@ -60,6 +60,68 @@ test('asset transfer does not mark a failed scan as available', async () => {
   } finally { await new Promise((resolve) => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test('asset transfer replay and resume require the original scope and payload', async () => {
+  let begins = 0; let uploads = 0; let requests = 0;
+  const server = http.createServer(async (req, res) => {
+    requests++;
+    if (req.url === '/begin' && req.method === 'POST') {
+      begins++; for await (const _chunk of req) {}
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ upload_id: `upload-${begins}` })); return;
+    }
+    if (req.url.endsWith('/upload') && req.method === 'PUT') {
+      uploads++; for await (const _chunk of req) {}
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ asset_id: 'asset-bound', state: 'available' })); return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'priors-asset-binding-'));
+  const source = path.join(dir, 'original.md'); const renamed = path.join(dir, 'renamed.md'); const state = path.join(dir, 'state.json');
+  await fs.writeFile(source, 'same bytes\n'); await fs.writeFile(renamed, 'same bytes\n');
+  const endpoint = `http://127.0.0.1:${server.address().port}`;
+  const env = { ...process.env, PRIORS_ASSET_ENDPOINT: endpoint, PRIORS_ASSET_TOKEN: 'binding-token-a', PRIORS_ASSET_TRANSFER_STATE: state };
+  const publish = (file, theme, token = 'binding-token-a', target = endpoint) => run(process.execPath,
+    ['scripts/asset-transfer.js', 'publish', file, theme, 'op-bound'], { cwd: path.resolve(__dirname, '..'), env: { ...env, PRIORS_ASSET_TOKEN: token, PRIORS_ASSET_ENDPOINT: target } });
+  const resume = (theme, token = 'binding-token-a', target = endpoint) => run(process.execPath,
+    ['scripts/asset-transfer.js', 'resume', 'op-bound', theme], { cwd: path.resolve(__dirname, '..'), env: { ...env, PRIORS_ASSET_TOKEN: token, PRIORS_ASSET_ENDPOINT: target } });
+  try {
+    const first = await publish(source, 'theme-a');
+    assert.equal(first.stdout.includes('credential_fingerprint'), false);
+    assert.equal(first.stdout.includes('endpoint_fingerprint'), false);
+    const saved = JSON.parse(await fs.readFile(state, 'utf8'))['op-bound'];
+    assert.equal(saved.credential_fingerprint.includes('binding-token-a'), false);
+    assert.equal(JSON.stringify(saved).includes('binding-token-a'), false);
+    await publish(source, 'theme-a');
+    await assert.rejects(publish(source, 'theme-b'), /asset_transfer_scope_mismatch/);
+    await assert.rejects(publish(source, 'theme-a', 'binding-token-b'), /asset_transfer_scope_mismatch/);
+    await assert.rejects(publish(source, 'theme-a', 'binding-token-a', 'http://127.0.0.1:1'), /asset_transfer_scope_mismatch/);
+    await assert.rejects(publish(renamed, 'theme-a'), /asset_transfer_payload_mismatch/);
+    await assert.rejects(resume('theme-b'), /asset_transfer_scope_mismatch/);
+    await assert.rejects(resume('theme-a', 'binding-token-b'), /asset_transfer_scope_mismatch/);
+    await assert.rejects(resume('theme-a', 'binding-token-a', 'http://127.0.0.1:1'), /asset_transfer_scope_mismatch/);
+    await resume('theme-a');
+    for (const malformed of [endpoint + '#fragment', endpoint + '#', endpoint + '?mode=other', endpoint + '?']) {
+      const before = requests;
+      await assert.rejects(publish(source, 'theme-a', 'binding-token-a', malformed), /asset_transfer_config_invalid/);
+      await assert.rejects(resume('theme-a', 'binding-token-a', malformed), /asset_transfer_config_invalid/);
+      assert.equal(requests, before, 'invalid endpoint made a request');
+    }
+    await fs.writeFile(source, 'edited bytes\n');
+    await assert.rejects(resume('theme-a'), /asset_transfer_payload_mismatch/);
+    assert.equal(begins, 1); assert.equal(uploads, 1);
+  } finally { await new Promise((resolve) => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('asset transfer refuses legacy unbound state rows', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'priors-asset-legacy-'));
+  const source = path.join(dir, 'probe.md'); const state = path.join(dir, 'state.json');
+  await fs.writeFile(source, 'legacy\n');
+  await fs.writeFile(state, JSON.stringify({ old: { operation_id: 'old', stage: 'available', sha256: 'anything', local_path: source } }));
+  const env = { ...process.env, PRIORS_ASSET_ENDPOINT: 'http://127.0.0.1:1', PRIORS_ASSET_TOKEN: 'legacy-test', PRIORS_ASSET_TRANSFER_STATE: state };
+  try { await assert.rejects(run(process.execPath, ['scripts/asset-transfer.js', 'publish', source, 'theme-test', 'old'], { cwd: path.resolve(__dirname, '..'), env }), /asset_transfer_legacy_binding_missing/); }
+  finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 test('asset transfer never falls back to a client memory token', async () => {
   const env = { ...process.env, PRIORS_ASSET_ENDPOINT: 'http://127.0.0.1:1', PRIORS_ASSET_TOKEN: '', PRIORS_TOKEN_CLAUDE_V1: 'client-token', PRIORS_TOKEN_CODEX_V1: 'other-client-token' };
   await assert.rejects(run(process.execPath, ['scripts/asset-transfer.js', 'publish', 'missing.md', 'theme-test', 'op-token'], { cwd: path.resolve(__dirname, '..'), env }), /ENOENT/);

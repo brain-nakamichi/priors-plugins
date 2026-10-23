@@ -32,6 +32,13 @@ SessionStartは機能の存在を短く案内するだけで、設定・token・
 
 `document-sync.js publish` は台帳の base 版・原文 SHA256、Priors の最新原文、手元の変更を Git `merge-file` で三者マージします。3入力とclean merge結果はstrict UTF-8かつ1 MiB以下です。競合 marker 出力はUTF-8を検証し、最大8 MiBまで `.priors-merge-v<N>.md` sidecar に排他的に保存してPriorsへは書きません。競合が無い場合だけ最新版の version/SHA256 を条件に新しい `operation_id` で書き込みます。Gitが無い・異常終了・入力/clean結果の制限超過も安全側で停止します。結果不明の旧要求は同じ鍵・同じバイトで先に解決してからマージします。マージ書込のreceiptが確認できてもローカル設置が完了するまではそのpendingを保持し、次回 `publish` で設置またはsidecarへの退避を完了します。
 
-手動の文書監査は [`docs/document-audit.md`](../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.54）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。
+手動の文書監査は [`docs/document-audit.md`](../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.55）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。
+
+### Asset 転送の再開
+
+`asset-transfer.js resume <operation_id> <theme_id>` は、元と同じ接続先・Asset token・テーマ・ファイル名・内容でだけ再開します。
+接続先は `?`・`#`・URL内の認証情報を含まないベースURLを指定してください。
+旧形式の台帳に接続先の記録が無い場合は `asset_transfer_legacy_binding_missing` で停止します。
+元のreceiptを確かめ、必要な転送は新しいoperation keyで `publish` してください。旧receiptを別テーマの共有成功として扱わないでください。
 
 `hooks/` に旧候補処理や監査CLIが残る場合がありますが、既定hookからは呼びません。例外として `record-decision.js --decision skip --phase conversation-end --turn-id <turn_id>` は、保存不要と判断したターンの候補を解決する任意の手段です。特定の手動作業で必要な場合だけ、そのCLIの個別説明を確認してください。現行の自発利用契約や必須の終端手順として扱わないでください。

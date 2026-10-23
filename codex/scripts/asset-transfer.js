@@ -16,6 +16,37 @@ const endpoint = () => String(process.env.PRIORS_ASSET_ENDPOINT || '').replace(/
 // wrong actor and bypass the ownership boundary.
 const token = () => process.env.PRIORS_ASSET_TOKEN || '';
 const fail = (code) => { const e = new Error(code); e.code = code; throw e; };
+function requestContext() {
+  const rawEndpoint = String(process.env.PRIORS_ASSET_ENDPOINT || '');
+  const url = endpoint(); const bearer = token();
+  if (!url || !bearer) fail('asset_transfer_config_missing');
+  // URL fragments never reach the server and query strings can select a
+  // different endpoint. Reject both delimiters, including empty values.
+  if (/[?#]/u.test(rawEndpoint)) fail('asset_transfer_config_invalid');
+  let parsed;
+  try { parsed = new URL(url); } catch { fail('asset_transfer_config_invalid'); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) fail('asset_transfer_config_invalid');
+  parsed.hash = '';
+  const normalized = parsed.protocol + '//' + parsed.host + parsed.pathname.replace(/\/+$/u, '') + parsed.search;
+  // Store one-way discriminators only. Never persist a URL that could contain
+  // sensitive query parameters or the bearer itself.
+  return {
+    endpoint_fingerprint: crypto.createHash('sha256').update(normalized, 'utf8').digest('hex'),
+    credential_fingerprint: crypto.createHash('sha256').update(bearer, 'utf8').digest('hex'),
+  };
+}
+function validateBinding(row, expected) {
+  if (!row || typeof row.endpoint_fingerprint !== 'string' || typeof row.theme_id !== 'string'
+    || typeof row.credential_fingerprint !== 'string' || typeof row.filename !== 'string'
+    || !Number.isSafeInteger(row.byte_size) || typeof row.sha256 !== 'string') fail('asset_transfer_legacy_binding_missing');
+  if (row.endpoint_fingerprint !== expected.endpoint_fingerprint || row.theme_id !== expected.theme_id
+    || row.credential_fingerprint !== expected.credential_fingerprint) fail('asset_transfer_scope_mismatch');
+  if (row.filename !== expected.filename || row.byte_size !== expected.byte_size || row.sha256 !== expected.sha256) fail('asset_transfer_payload_mismatch');
+}
+function publicReceipt(row, replayed) {
+  const { operation_id, stage, upload_id, local_path, filename, byte_size, sha256, asset_id, failure_state, updated_at } = row;
+  return { operation_id, stage, upload_id, local_path, filename, byte_size, sha256, asset_id, failure_state, updated_at, replayed };
+}
 function safeName(value) { const name = path.basename(String(value)); if (!name || name === '.' || name === '..' || /[\0<>:"/\\|?*]/u.test(name)) fail('invalid_filename'); return name; }
 function mediaType(name) { const ext = path.extname(name).toLowerCase(); return ({'.md':'text/markdown','.txt':'text/plain','.csv':'text/csv','.json':'application/json','.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})[ext] || 'application/octet-stream'; }
 async function readState() { try { return JSON.parse(await fsp.readFile(stateFile(), 'utf8')); } catch { return {}; } }
@@ -25,10 +56,15 @@ async function request(url, init={}) { const response = await fetch(url, { redir
 async function publish(file, themeId, idempotencyKey) {
   const localPath = path.resolve(file); const name = safeName(path.basename(localPath)); const bytes = await fsp.readFile(localPath); if (!bytes.length || bytes.length > MAX_BYTES) fail('invalid_size');
   const hash = crypto.createHash('sha256').update(bytes).digest('hex'); const state = await readState(); const key = idempotencyKey || crypto.randomUUID();
-  const existing = state[key]; if (existing?.stage === 'available' && existing.sha256 === hash) return { ...existing, replayed: true };
+  const binding = { ...requestContext(), theme_id: String(themeId || ''), filename: name, byte_size: bytes.length, sha256: hash };
+  const existing = state[key];
+  if (existing) {
+    validateBinding(existing, binding);
+    if (existing.stage === 'available') return publicReceipt(existing, true);
+  }
   const begun = await request(`${endpoint()}/begin`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ theme_id: themeId, filename: name, byte_size: bytes.length, idempotency_key: key }) });
   const begin = await begun.json(); const uploadId = begin?.upload_id; if (typeof uploadId !== 'string') fail('asset_begin_invalid');
-  state[key] = { operation_id:key, stage:'begun', upload_id:uploadId, local_path:localPath, filename:name, byte_size:bytes.length, sha256:hash, updated_at:new Date().toISOString() }; await writeState(state);
+  state[key] = { operation_id:key, ...binding, stage:'begun', upload_id:uploadId, local_path:localPath, updated_at:new Date().toISOString() }; await writeState(state);
   const uploaded = await request(`${endpoint()}/${encodeURIComponent(uploadId)}/upload`, { method:'PUT', headers:{'content-type':mediaType(name)}, body:bytes });
   const result = await uploaded.json(); const assetId = result?.asset_id;
   if (result?.state !== 'available') {
@@ -38,7 +74,7 @@ async function publish(file, themeId, idempotencyKey) {
   }
   if (typeof assetId !== 'string') fail('asset_upload_invalid');
   state[key] = { ...state[key], stage:'available', asset_id:assetId, updated_at:new Date().toISOString() }; await writeState(state);
-  return { ...state[key], replayed:false };
+  return publicReceipt(state[key], false);
 }
 async function fetchAsset(assetId, destination) {
   const status = await (await request(`${endpoint()}/${encodeURIComponent(assetId)}/status`)).json(); if (status?.state !== 'available') fail('asset_not_available');
@@ -47,6 +83,6 @@ async function fetchAsset(assetId, destination) {
   const hash = crypto.createHash('sha256').update(body).digest('hex'); if (status.content_hash && String(status.content_hash).replace(/^\\x/u,'') !== hash) fail('asset_hash_mismatch');
   await fsp.writeFile(tmp, body, { mode:0o600 }); await fsp.rename(tmp, target); return { asset_id:assetId, local_path:target, filename, byte_size:body.length, sha256:hash };
 }
-async function main(argv) { const [command, ...args] = argv; if (command === 'publish') return publish(args[0], args[1], args[2]); if (command === 'fetch') return fetchAsset(args[0], args[1]); if (command === 'resume') { const state = await readState(); const key = args[0]; if (!key || !state[key]) fail('transfer_not_found'); const row = state[key]; if (row.stage === 'available') return {...row, replayed:true}; if (!row.local_path) fail('resume_local_path_missing'); return publish(row.local_path, args[1], key); } fail('usage'); }
+async function main(argv) { const [command, ...args] = argv; if (command === 'publish') return publish(args[0], args[1], args[2]); if (command === 'fetch') return fetchAsset(args[0], args[1]); if (command === 'resume') { const state = await readState(); const key = args[0]; const themeId = args[1]; if (!key || !state[key]) fail('transfer_not_found'); if (!themeId) fail('asset_transfer_theme_required'); const row = state[key]; const context = requestContext(); const file = row.local_path ? path.resolve(row.local_path) : ''; if (!file) fail('resume_local_path_missing'); let bytes; try { bytes = await fsp.readFile(file); } catch { fail('resume_local_path_missing'); } if (!bytes.length || bytes.length > MAX_BYTES) fail('invalid_size'); validateBinding(row, { ...context, theme_id: String(themeId), filename: safeName(path.basename(file)), byte_size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }); if (row.stage === 'available') return publicReceipt(row, true); return publish(file, themeId, key); } fail('usage'); }
 module.exports = { safeName, mediaType, MAX_BYTES };
 if (require.main === module) main(process.argv.slice(2)).then((value) => { process.stdout.write(JSON.stringify(value) + '\n'); }).catch((error) => { process.stderr.write(JSON.stringify({ error: error.code || 'asset_transfer_failed' }) + '\n'); process.exitCode = 1; });
