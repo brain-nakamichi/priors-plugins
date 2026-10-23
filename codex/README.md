@@ -8,4 +8,4 @@ UserPromptSubmit は毎ターン開始時に、保持基準に合う重要情報
 
 確認先は `PRIORS_PLUGIN_UPDATE_URL`、通知状態の保存先は `PRIORS_PLUGIN_UPDATE_STATE_FILE` で上書きできます。確認先は HTTPS かつ許可ホストのみ利用します。
 
-手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.53）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。
+手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.54）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。

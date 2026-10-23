@@ -9,7 +9,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'document-sync.js');
-const { classify, normalizeLf, repoPath, auditManifest } = require(SCRIPT);
+const { classify, normalizeLf, repoPath, auditManifest, gitMerge } = require(SCRIPT);
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 test('Claude and Codex plugin package versions and audit scripts stay aligned', () => {
@@ -25,7 +25,7 @@ test('Claude and Codex plugin package versions and audit scripts stay aligned', 
     require(path.join(root, 'codex-plugins/marketplace.json')).metadata.version,
     require(path.join(root, 'codex-plugins/marketplace.json')).version,
   ];
-  assert.deepEqual(versions, Array(9).fill('0.1.53'));
+  assert.deepEqual(versions, Array(9).fill('0.1.54'));
   assert.equal(fs.readFileSync(path.join(root, 'plugin/scripts/document-sync.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'codex-plugins/priors/scripts/document-sync.js'), 'utf8'));
 });
@@ -37,6 +37,33 @@ test('audit helpers normalize only CRLF and reject unsafe repository paths', () 
   const root = path.resolve('repo-root');
   assert.equal(repoPath(root, 'docs/a.md'), path.join(root, 'docs', 'a.md'));
   for (const unsafe of ['../secret', '/outside', 'a\\..\\secret', 'a//b']) assert.throws(() => repoPath(root, unsafe));
+});
+
+test('three-way merge preserves bytes on clean merge and leaves conflict markers on overlap', () => {
+  const base = Buffer.from('one\nmiddle\nthree\n');
+  const local = Buffer.from('ONE\nmiddle\nthree\n');
+  const remote = Buffer.from('one\nmiddle\nTHREE\n');
+  const clean = gitMerge(local, base, remote);
+  assert.equal(clean.clean, true);
+  assert.ok(clean.bytes.includes(Buffer.from('ONE')));
+  assert.ok(clean.bytes.includes(Buffer.from('THREE')));
+  const conflict = gitMerge(Buffer.from('same local\n'), Buffer.from('same\n'), Buffer.from('same remote\n'));
+  assert.equal(conflict.clean, false);
+  assert.match(conflict.bytes.toString('utf8'), /<<<<<<<|=======|>>>>>>>/);
+  assert.throws(() => gitMerge(Buffer.from([0xff]), base, remote), /document_invalid_utf8/);
+  assert.throws(() => gitMerge(Buffer.alloc(1048577), base, remote), /document_too_large/);
+});
+
+test('three-way merge handles separated hunks and reports missing Git safely', () => {
+  const base = Buffer.from('one\ntwo\nthree\nfour\nfive\nsix\nseven\n');
+  const local = Buffer.from('ONE\ntwo\nthree\nfour\nfive\nsix\nSEVEN\n');
+  const remote = Buffer.from('one\ntwo\nTHREE\nfour\nFIVE\nsix\nseven\n');
+  const merged = gitMerge(local, base, remote);
+  assert.equal(merged.clean, true);
+  assert.equal(merged.bytes.toString(), 'ONE\ntwo\nTHREE\nfour\nFIVE\nsix\nSEVEN\n');
+  const oldPath = process.env.PATH;
+  try { process.env.PATH = ''; assert.throws(() => gitMerge(local, base, remote)); }
+  finally { process.env.PATH = oldPath; }
 });
 
 async function auditFixture(t, row = { theme: 'GEN', document_id: '432c36d9-37cc-4f9f-853d-693a56401a21', path: 'docs/a.md' }) {
@@ -184,8 +211,9 @@ function fakePriors() {
   const receipts = new Map();
   // test controls: drop the answer of the next N writes (applied=true: the write happens, only the reply is lost);
   // onDownload runs while a GET of the content is being served
-  const ctl = { dropWrites: 0, applied: false, onDownload: null, writes: 0 };
+  const ctl = { dropWrites: 0, applied: false, onDownload: null, beforeWrite: null, writes: 0 };
   const write = (args, bytes) => {
+    if (ctl.beforeWrite) { const beforeWrite = ctl.beforeWrite; ctl.beforeWrite = null; beforeWrite(args, bytes); }
     if (receipts.has(args.operation_id)) return { ...receipts.get(args.operation_id), replayed: true };
     let id = args.document_id;
     if (!id) {
@@ -333,6 +361,150 @@ test('GEN-579: an edit made while fetch downloads is kept; the remote goes to a 
     assert.deepEqual(fs.readFileSync(r.out.path), v2);
     // the ledger did not move: the local edit is still measured against v1
     r = await run(['status', file], env); assert.equal(r.out.state, 'conflict');
+  });
+});
+
+test('publish automatically writes a clean three-way merge using latest remote CAS metadata', async () => {
+  await withFake(async ({ docs, dir, env }) => {
+    const file = path.join(dir, 'merge.md');
+    fs.writeFileSync(file, 'one\nmiddle\nthree\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'merge.md'], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id);
+    const remote = Buffer.from('one\nmiddle\nTHREE\n'); d.versions.push({ bytes: remote, sha: sha(remote) });
+    const local = Buffer.from('ONE\nmiddle\nthree\n'); fs.writeFileSync(file, local);
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err));
+    assert.equal(r.out.merged, true);
+    assert.deepEqual(d.versions.at(-1).bytes, Buffer.from('ONE\nmiddle\nTHREE\n'));
+    assert.deepEqual(fs.readFileSync(file), d.versions.at(-1).bytes);
+  });
+});
+
+test('late CAS conflict on an otherwise local-only publish is merged against the new head', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'late.md'); fs.writeFileSync(file, 'one\ntwo\nthree\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'late.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); fs.writeFileSync(file, 'ONE\ntwo\nthree\n');
+    ctl.beforeWrite = () => { const remote = Buffer.from('one\ntwo\nTHREE\n'); d.versions.push({ bytes:remote, sha:sha(remote) }); };
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.merged, true);
+    assert.equal(d.versions.at(-1).bytes.toString(), 'ONE\ntwo\nTHREE\n');
+  });
+});
+
+test('a resumed old CAS conflict is merged after its original operation is settled', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'resume-cas.md'); fs.writeFileSync(file, 'one\ntwo\nthree\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'resume-cas.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); fs.writeFileSync(file, 'ONE\ntwo\nthree\n');
+    ctl.dropWrites = 3; ctl.applied = false;
+    r = await run(['publish', file], env); assert.equal(r.err.error, 'result_unknown'); const oldOp = r.err.operation_id;
+    const remote = Buffer.from('one\ntwo\nTHREE\n'); d.versions.push({ bytes:remote, sha:sha(remote) });
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.merged, true);
+    assert.equal(r.out.resumed.operation_id, oldOp);
+    assert.equal(d.versions.at(-1).bytes.toString(), 'ONE\ntwo\nTHREE\n');
+  });
+});
+
+test('a lost clean-merge acknowledgement replays its own bytes and preserves later local edits', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'merge-unknown.md'); fs.writeFileSync(file, 'one\ntwo\nthree\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'merge-unknown.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const remote = Buffer.from('one\ntwo\nTHREE\n'); d.versions.push({ bytes:remote, sha:sha(remote) });
+    fs.writeFileSync(file, 'ONE\ntwo\nthree\n'); ctl.dropWrites = 3; ctl.applied = true;
+    r = await run(['publish', file], env); assert.equal(r.err.error, 'result_unknown'); const op = r.err.operation_id;
+    fs.writeFileSync(file, 'new edit after merge request\n');
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.state, 'published_local_changed');
+    assert.equal(r.out.resumed.operation_id, op);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'new edit after merge request\n');
+    assert.equal(fs.readFileSync(r.out.sidecar, 'utf8'), 'ONE\ntwo\nTHREE\n');
+    assert.equal(d.versions.length, 3);
+    const ledger = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'ledger.json'), 'utf8'));
+    assert.equal(ledger[file].base_version, 1, 'do not advance the base while merged bytes are only in a sidecar');
+    r = await run(['status', file], env); assert.equal(r.out.state, 'conflict');
+  });
+});
+
+test('publish recovers a receipt-confirmed merge whose local installation was interrupted', async () => {
+  await withFake(async ({ docs, receipts, dir, env }) => {
+    const file = path.join(dir, 'merge-install-recovery.md'); fs.writeFileSync(file, 'one\ntwo\nthree\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'merge-install-recovery.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const remote = Buffer.from('one\ntwo\nTHREE\n'); d.versions.push({ bytes:remote, sha:sha(remote) });
+    const local = Buffer.from('ONE\ntwo\nthree\n'); const merged = Buffer.from('ONE\ntwo\nTHREE\n'); fs.writeFileSync(file, local);
+    const operation_id = 'docsync-interrupted-merge'; d.versions.push({ bytes:merged, sha:sha(merged) });
+    const receipt = { ok:true, document_id:r.out.document_id, document_key:d.key, version:3, sha256:sha(merged) }; receipts.set(operation_id, receipt);
+    const args = { operation_id, document_id:r.out.document_id, expected_version:2, expected_sha256:sha(remote) };
+    const pending = { theme:'GEN', args, operation_id, local_sha256:sha(merged), merge:{ input_sha256:sha(local), base_snapshot:{base_version:1,base_sha256:d.versions[0].sha} } };
+    const ledgerPath = path.join(dir, 'state', 'ledger.json'); const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+    ledger[file] = { ...ledger[file], stage:'merge_installing', pending }; fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+    const pendingDir = path.join(dir, 'state', 'document-sync-pending'); fs.mkdirSync(pendingDir, {recursive:true});
+    fs.writeFileSync(path.join(pendingDir, `${operation_id}.bin`), merged);
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.merged, true);
+    assert.deepEqual(fs.readFileSync(file), merged);
+    const finalLedger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+    assert.equal(finalLedger[file].base_version, 3); assert.equal(finalLedger[file].pending, undefined);
+  });
+});
+
+test('an edit arriving during merge publication stays local and gets an exclusive sidecar for merged bytes', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'merge-edit.md'); fs.writeFileSync(file, 'one\ntwo\nthree\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'merge-edit.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const remote = Buffer.from('one\ntwo\nTHREE\n'); d.versions.push({ bytes:remote, sha:sha(remote) });
+    fs.writeFileSync(file, 'ONE\ntwo\nthree\n');
+    ctl.beforeWrite = () => fs.writeFileSync(file, 'concurrent edit\n');
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 0, JSON.stringify(r.err)); assert.equal(r.out.state, 'published_local_changed');
+    assert.equal(fs.readFileSync(file, 'utf8'), 'concurrent edit\n');
+    assert.equal(fs.readFileSync(r.out.sidecar, 'utf8'), 'ONE\ntwo\nTHREE\n');
+    assert.equal(d.versions.at(-1).bytes.toString(), 'ONE\ntwo\nTHREE\n');
+    const ledger = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'ledger.json'), 'utf8'));
+    assert.equal(ledger[file].base_version, 1, 'the old local file must remain based on its original version');
+  });
+});
+
+test('a missing Git executable stops before writing and explains the fallback', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'no-git.md'); fs.writeFileSync(file, 'same\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'no-git.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const remote = Buffer.from('remote\n'); d.versions.push({ bytes:remote, sha:sha(remote) });
+    fs.writeFileSync(file, 'local\n'); const writes = ctl.writes;
+    r = await run(['publish', file], { ...env, PATH:'' });
+    assert.equal(r.code, 1); assert.equal(r.err.error, 'merge_unavailable');
+    assert.match(r.err.note, /Git merge-file/); assert.equal(ctl.writes, writes);
+  });
+});
+
+test('overlapping changes save conflict markers exclusively without writing to Priors', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'overlap.md'); fs.writeFileSync(file, 'same\n');
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'overlap.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const remote = Buffer.from('remote\n'); d.versions.push({ bytes: remote, sha: sha(remote) });
+    fs.writeFileSync(file, 'local\n'); const writes = ctl.writes;
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 1); assert.equal(r.err.error, 'merge_conflict');
+    assert.match(fs.readFileSync(r.err.sidecar, 'utf8'), /<<<<<<<|=======|>>>>>>>/);
+    assert.equal(ctl.writes, writes);
+    assert.equal(d.versions.length, 2);
+  });
+});
+
+test('conflict marker output above 1 MiB is kept as a sidecar without a Priors write', async () => {
+  await withFake(async ({ docs, ctl, dir, env }) => {
+    const file = path.join(dir, 'large-conflict.md'); const base = Buffer.from('a'.repeat(600 * 1024)); fs.writeFileSync(file, base);
+    let r = await run(['publish', file, '--theme', 'GEN', '--key', 'large-conflict.md'], env); assert.equal(r.code, 0, JSON.stringify(r.err));
+    const d = docs.get(r.out.document_id); const remote = Buffer.from('r'.repeat(600 * 1024)); d.versions.push({ bytes:remote, sha:sha(remote) });
+    fs.writeFileSync(file, Buffer.from('l'.repeat(600 * 1024))); const writes = ctl.writes;
+    r = await run(['publish', file], env);
+    assert.equal(r.code, 1); assert.equal(r.err.error, 'merge_conflict');
+    const markers = fs.readFileSync(r.err.sidecar);
+    assert.ok(markers.length > 1048576);
+    assert.match(markers.toString('utf8').slice(0, 100), /<<<<<<< local/);
+    assert.equal(ctl.writes, writes); assert.equal(d.versions.length, 2);
   });
 });
 

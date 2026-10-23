@@ -141,6 +141,10 @@ async function status(p) {
   const abs = safePath(p);
   const row = await withLedger(async (s) => s[abs]);
   const local = await readLocal(abs);
+  if (row?.pending && row.stage === 'merge_installing') {
+    return { path:abs, state:'merge_install_pending', tracked:!!row.document_id, operation_id:row.pending.operation_id,
+      note:'the merged write is confirmed; run publish to safely finish placing the merged local file' };
+  }
   if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing')) {
     return { path: abs, state: 'publish_result_unknown', tracked: !!row.document_id, operation_id: row.pending.operation_id,
       note: 'an earlier publish has no known result; run publish again to ask the server with the same request' };
@@ -184,7 +188,7 @@ const dropPending = (opId) => fsp.rm(pendingFile(opId), { force: true });
 
 /** Send one write and settle the ledger. The request (args + bytes) is saved before sending so that a lost answer can
  *  be asked again later with the same operation_id: the server replays its receipt instead of writing twice. */
-async function sendAndSettle(abs, theme, args, bytes) {
+async function sendAndSettle(abs, theme, args, bytes, options = {}) {
   const sid = await session(theme);
   let out;
   try { out = await writeRemote(theme, sid, args, bytes); } catch (e) {
@@ -198,10 +202,85 @@ async function sendAndSettle(abs, theme, args, bytes) {
     throw e;
   }
   if (out.sha256 !== sha256(bytes)) fail('document_hash_mismatch');
-  await withLedger(async (s) => { s[abs] = { theme, document_id: out.document_id, document_key: out.document_key, base_version: out.version,
-    base_sha256: out.sha256, local_sha256: out.sha256, remote_head: out.version, synced_at: new Date().toISOString(), stage: 'synced' }; });
-  await dropPending(args.operation_id);
+  if (options.keepPending) {
+    await withLedger(async (s) => { const row = s[abs] || {}; s[abs] = { ...row, theme, document_id: out.document_id, document_key: out.document_key,
+      stage:'merge_installing', updated_at:new Date().toISOString() }; });
+  } else {
+    await withLedger(async (s) => { s[abs] = { theme, document_id: out.document_id, document_key: out.document_key, base_version: out.version,
+      base_sha256: out.sha256, local_sha256: out.sha256, remote_head: out.version, synced_at: new Date().toISOString(), stage: 'synced' }; });
+    await dropPending(args.operation_id);
+  }
   return out;
+}
+
+function strictUtf8(bytes) { if (bytes.length > MAX_BYTES) fail('document_too_large'); try { new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); } catch { fail('document_invalid_utf8'); } }
+function strictUtf8Text(bytes) { try { new TextDecoder('utf-8', { fatal:true, ignoreBOM:true }).decode(bytes); } catch { fail('document_invalid_utf8'); } }
+function gitMerge(local, base, remote) {
+  for (const x of [local, base, remote]) strictUtf8(x);
+  const tmpRoot = path.resolve(os.tmpdir());
+  const dir = fs.mkdtempSync(path.join(tmpRoot, 'priors-merge-'));
+  const resolved = path.resolve(dir), relative = path.relative(tmpRoot, resolved);
+  if (!path.basename(resolved).startsWith('priors-merge-') || !relative || relative.startsWith('..') || path.isAbsolute(relative)) fail('merge_temp_unsafe');
+  try { const l=path.join(dir,'local'), b=path.join(dir,'base'), r=path.join(dir,'remote'); fs.writeFileSync(l,local); fs.writeFileSync(b,base); fs.writeFileSync(r,remote);
+    try { return {clean:true, bytes:execFileSync('git',['merge-file','--stdout','-L','local','-L','base','-L','remote',l,b,r],{encoding:'buffer',maxBuffer:8*MAX_BYTES,stdio:['ignore','pipe','ignore']})}; }
+    catch(e) {
+      if(Number.isInteger(e.status)&&e.status>=1&&e.status<=127&&Buffer.isBuffer(e.stdout)&&e.stdout.length<=8*MAX_BYTES
+        && /<<<<<<< local[\s\S]*=======+[\s\S]*>>>>>>> remote/.test(e.stdout.toString('utf8'))) {
+        strictUtf8Text(e.stdout); return {clean:false,bytes:e.stdout};
+      }
+      throw e;
+    }
+  } finally { fs.rmSync(resolved,{recursive:true,force:true}); }
+}
+async function mergeSidecar(abs, bytes, version) { const ext=path.extname(abs)||'.md'; for(let n=1;n<1000;n++){const p=abs+'.priors-merge-v'+version+(n===1?'':'-'+n)+ext; try{await fsp.writeFile(p,bytes,{flag:'wx',mode:0o600});return p;}catch(e){if(e.code!=='EEXIST')throw e;}} fail('no_free_name'); }
+async function installMerged(abs, bytes, version, expectedLocalSha) {
+  const current = await readLocal(abs);
+  if (current && current.equals(bytes)) return { state:'up_to_date', installed:true };
+  if (!current || sha256(current) !== expectedLocalSha) {
+    const sidecar = await mergeSidecar(abs, bytes, version);
+    return { state:'published_local_changed', sidecar, installed:false };
+  }
+  const tmp = `${abs}.tmp-${process.pid}`; await fsp.writeFile(tmp, bytes, { mode:0o600 });
+  try {
+    const result = await replaceWithoutLoss(abs, tmp, current);
+    const atPath = await readLocal(abs);
+    const installed = !!atPath && sha256(atPath) === sha256(bytes);
+    if (!installed) {
+      const sidecar = await mergeSidecar(abs, bytes, version);
+      return { state:'published_local_changed', sidecar, installed:false, ...(result.preserved ? { local_edit_kept_at:result.preserved } : {}) };
+    }
+    return { state:result.preserved ? 'published_local_changed' : 'up_to_date', installed:true, ...(result.preserved ? { local_edit_kept_at:result.preserved } : {}) };
+  } finally { await fsp.rm(tmp, { force:true }); }
+}
+async function finishMergeLedger(abs, pending, localBytes, out, installed) {
+  const saved = pending.merge?.base_snapshot;
+  if (!saved) fail('merge_base_snapshot_lost');
+  await withLedger(async (s) => {
+    const current = s[abs] || {};
+    const { pending:_pending, ...rest } = current;
+    s[abs] = installed
+      ? { ...rest, theme:pending.theme || current.theme, document_id:out.document_id, document_key:out.document_key, base_version:out.version,
+        base_sha256:out.sha256, local_sha256:out.sha256, remote_head:out.version, synced_at:new Date().toISOString(), stage:'synced' }
+      : { ...rest, base_version:saved.base_version, base_sha256:saved.base_sha256,
+        local_sha256:sha256(localBytes || Buffer.alloc(0)), remote_head:out.version, stage:'merge_local_changed', updated_at:new Date().toISOString() };
+  });
+  await dropPending(pending.operation_id);
+}
+async function mergeAndPublish(abs,theme,row,local,installInputSha=sha256(local)) {
+  const base=await download(theme,row.document_id,row.base_version); if(base.version!==row.base_version||base.sha256!==row.base_sha256) fail('ledger_base_mismatch');
+  let meta=await remoteVersionMeta(theme,row.document_id,null);
+  for(let attempt=0;attempt<2;attempt++) {
+    const remote=await download(theme,row.document_id,meta.head_version); if(remote.version!==meta.head_version||remote.sha256!==meta.sha256) fail('remote_snapshot_mismatch');
+    let m; try{m=gitMerge(local,base.bytes,remote.bytes);}catch(e){if(e.code==='document_invalid_utf8'||e.code==='document_too_large')throw e;fail('merge_unavailable',{note:'Git merge-file is unavailable or failed; install Git and retry'});}
+    if(!m.clean){const sidecar=await mergeSidecar(abs,m.bytes,remote.version);fail('merge_conflict',{sidecar,remote_version:remote.version,note:'Conflict markers were saved beside the local file; Priors was not written'});}
+    strictUtf8(m.bytes); const operation_id='docsync-'+crypto.randomUUID(); const args={operation_id,document_id:row.document_id,expected_version:meta.head_version,expected_sha256:meta.sha256};
+    await savePending(operation_id,m.bytes); await withLedger(async s=>{s[abs]={...(s[abs]||{}),stage:'publishing',pending:{theme,args,local_sha256:sha256(m.bytes),operation_id,merge:{input_sha256:installInputSha,base_snapshot:{base_version:row.base_version,base_sha256:row.base_sha256}}},updated_at:new Date().toISOString()};});
+    try { const out=await sendAndSettle(abs,theme,args,m.bytes,{keepPending:true}); const installed=await installMerged(abs,m.bytes,out.version,installInputSha);
+      await finishMergeLedger(abs,{operation_id,theme,merge:{base_snapshot:{base_version:row.base_version,base_sha256:row.base_sha256}}},await readLocal(abs),out,installed.installed);
+      return {...installed,published:true,merged:true,document_id:out.document_id,version:out.version,sha256:out.sha256};
+    } catch(e){if(e.code!=='version_conflict')throw e;await dropPending(operation_id);meta=await remoteVersionMeta(theme,row.document_id,null);}
+  }
+  const sidecar=await mergeSidecar(abs,local,meta.head_version); fail('merge_retry_exhausted',{sidecar,note:'Priors kept changing during compare-and-swap; merge was not published'});
 }
 
 async function publish(p, opts) {
@@ -211,14 +290,29 @@ async function publish(p, opts) {
     const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
     let resumed = null;
     // a publish whose answer was lost: ask again with the same operation_id and the same bytes before anything else
-    if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing')) {
+    if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing' || row.stage === 'merge_installing')) {
       const pend = row.pending;
       const pendBytes = await loadPending(pend);
       try {
-        const out = await sendAndSettle(abs, pend.theme || theme, pend.args, pendBytes);
+        const out = await sendAndSettle(abs, pend.theme || theme, pend.args, pendBytes, {keepPending:!!pend.merge});
+        if (pend.merge?.input_sha256) {
+          const installed = await installMerged(abs, pendBytes, out.version, pend.merge.input_sha256);
+          await finishMergeLedger(abs,pend,await readLocal(abs),out,installed.installed);
+          return { path:abs, ...installed, published:true, merged:true, document_id:out.document_id, version:out.version, sha256:out.sha256,
+            resumed:{operation_id:pend.args.operation_id,document_id:out.document_id,version:out.version,replayed:!!out.replayed} };
+        }
         resumed = { operation_id: pend.args.operation_id, document_id: out.document_id, version: out.version, replayed: !!out.replayed };
       } catch (e) {
         if (e.code === 'result_unknown') throw e;
+        if (e.code === 'version_conflict') {
+          const latest = await withLedger(async (s) => s[abs]);
+          const current = await readLocal(abs);
+          const source = pendBytes;
+          if (current && latest?.base_version && latest?.base_sha256) {
+            const result = await mergeAndPublish(abs, pend.theme || theme, latest, source, pend.merge?.input_sha256 || sha256(pendBytes));
+            return { ...result, resumed:{operation_id:pend.args.operation_id,document_id:pend.args.document_id,version:latest.base_version,replayed:false} };
+          }
+        }
         fail(e.code === 'version_conflict' ? 'conflict' : (e.code || 'resume_failed'), { resumed_operation_id: pend.args.operation_id,
           note: 'the earlier publish was not applied; check status and publish again' });
       }
@@ -232,7 +326,8 @@ async function publish(p, opts) {
       const head = await remoteVersionMeta(theme, row.document_id, null);
       const state = classify(row, localSha, head.head_version);
       if (state === 'up_to_date') return { path: abs, state, document_id: row.document_id, version: row.base_version, published: !!resumed, ...(resumed ? { resumed } : {}) };
-      if (state !== 'local_changed') fail(state === 'conflict' ? 'conflict' : `not_publishable_${state}`, { remote_head: head.head_version, base_version: row.base_version });
+      if (state === 'conflict') return mergeAndPublish(abs, theme, row, bytes);
+      if (state !== 'local_changed') fail(`not_publishable_${state}`, { remote_head: head.head_version, base_version: row.base_version });
     }
     const opId = `docsync-${crypto.randomUUID()}`;
     const args = tracked
@@ -241,7 +336,16 @@ async function publish(p, opts) {
     await savePending(opId, bytes);
     await withLedger(async (s) => { s[abs] = { ...(s[abs] || {}), theme, stage: 'publishing',
       pending: { theme, args, local_sha256: localSha, operation_id: opId }, updated_at: new Date().toISOString() }; });
-    const out = await sendAndSettle(abs, theme, args, bytes);
+    let out;
+    try { out = await sendAndSettle(abs, theme, args, bytes); }
+    catch (e) {
+      if (e.code === 'version_conflict' && tracked) {
+        const latest = await withLedger(async (s) => s[abs]);
+        const current = await readLocal(abs);
+        if (current && latest?.base_version && latest?.base_sha256) return mergeAndPublish(abs, theme, latest, bytes, sha256(bytes));
+      }
+      throw e;
+    }
     return { path: abs, state: 'up_to_date', published: true, document_id: out.document_id, version: out.version, sha256: out.sha256,
       replayed: !!out.replayed, ...(resumed ? { resumed } : {}) };
   });
@@ -314,9 +418,10 @@ async function fetchDoc(p, opts) {
     const row = await withLedger(async (s) => s[abs]);
     // an earlier publish whose result is unknown must be settled first: a fetched copy with the same hash is not proof
     // that the request succeeded, and replacing the ledger row would drop the saved request (GEN-584)
-    if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing')) {
-      fail('publish_result_unknown', { operation_id: row.pending.operation_id,
-        note: 'run publish first; it asks the server with the same request and settles it' });
+    if (row?.pending && (row.stage === 'unknown' || row.stage === 'publishing' || row.stage === 'merge_installing')) {
+      fail(row.stage === 'merge_installing' ? 'merge_install_pending' : 'publish_result_unknown', { operation_id: row.pending.operation_id,
+        note: row.stage === 'merge_installing' ? 'run publish first; it replays the confirmed merge receipt and safely completes local installation'
+          : 'run publish first; it asks the server with the same request and settles it' });
     }
     const theme = opts.theme || row?.theme; if (!theme) fail('theme_required');
     const target = opts.id ? { document_id: opts.id } : opts.key ? { document_key: opts.key } : row?.document_id ? { document_id: row.document_id } : fail('document_required');
@@ -492,7 +597,7 @@ async function main(argv) {
   if (cmd === 'fetch') return fetchDoc(file, o);
   fail('usage');
 }
-module.exports = { classify, safePath, sha256, replaceWithoutLoss, normalizeLf, repoPath, auditManifest };
+module.exports = { classify, safePath, sha256, replaceWithoutLoss, normalizeLf, repoPath, auditManifest, gitMerge };
 if (require.main === module) {
   main(process.argv.slice(2)).then((v) => process.stdout.write(JSON.stringify(v) + '\n'))
     .catch((e) => { process.stderr.write(JSON.stringify({ error: e.code || 'document_sync_failed', ...(e.extra || {}) }) + '\n'); process.exitCode = 1; });
