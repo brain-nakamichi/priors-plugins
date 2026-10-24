@@ -9,6 +9,7 @@
 //   node document-sync.js status  <path>
 //   node document-sync.js publish <path> --theme T [--key K --title X]     (create when the file is not tracked)
 //   node document-sync.js fetch   <path> --theme T (--key K | --id ID) [--version N]
+//   node document-sync.js resolve --theme T (--key K | --id ID) --repo <root> --repo-id <audit-label> [--version N]
 //
 // Environment: PRIORS_DOCUMENT_TOKEN (a Priors token of this client; never another client's) and optionally
 // PRIORS_MCP_URL (default https://priors-brain9.vercel.app/mcp), PRIORS_DOCUMENT_SYNC_STATE (ledger file),
@@ -473,6 +474,349 @@ function repoPath(root, p) {
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) fail('invalid_manifest_path');
   return abs;
 }
+
+const OID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REPO_ID_RE = /^[A-Za-z0-9_.-]{1,100}$/;
+const WINDOWS_DEVICE_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
+function statIdentity(s) { return `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`; }
+
+function assertNoSymlinkPath(abs) {
+  const parsed = path.parse(abs);
+  let cur = parsed.root;
+  for (const part of abs.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+    cur = path.join(cur, part);
+    try { if (fs.lstatSync(cur).isSymbolicLink()) fail('symlink_refused'); }
+    catch (error) { if (error.code === 'symlink_refused') throw error; if (error.code === 'ENOENT') fail('repo_path_missing'); throw error; }
+  }
+}
+
+function safeRepoPath(root, p) {
+  const abs = repoPath(root, p);
+  const parts = p.split('/');
+  if (parts.some((part) => part.endsWith('.') || part.endsWith(' ') || WINDOWS_DEVICE_RE.test(part))) fail('unsafe_repo_path');
+  if (parts.some((part) => part.toLowerCase() === '.git' || /^\.env/i.test(part)
+      || /^(?:credentials?|secrets?|token|api[_-]?key|id_rsa|id_ed25519)(?:[._-]|$)/i.test(part))) fail('sensitive_repo_path');
+  if (!/\.(?:md|markdown)$/i.test(parts.at(-1))) fail('markdown_path_required');
+  return abs;
+}
+
+function samePath(a, b) { return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b; }
+
+function repoRootIdentity(repo, expected = null) {
+  assertNoSymlinkPath(repo);
+  let real;
+  try { real = fs.realpathSync(repo); } catch { fail('repository_changed'); }
+  if (!samePath(real, repo)) fail('repository_changed');
+  let stat;
+  try { stat = fs.lstatSync(repo); } catch { fail('repository_changed'); }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) fail('repository_changed');
+  const identity = `${stat.dev}:${stat.ino}`;
+  if (expected && identity !== expected) fail('repository_changed');
+  return identity;
+}
+
+async function readBoundedStableFile(root, relative, absolute) {
+  // Refuse reparse points/junctions on every segment immediately before and after reading.
+  const rel = path.relative(root, absolute);
+  let cur = root;
+  for (const part of rel.split(path.sep).filter(Boolean)) {
+    cur = path.join(cur, part);
+    try { if ((await fsp.lstat(cur)).isSymbolicLink()) fail('symlink_refused'); }
+    catch (error) { if (error.code === 'symlink_refused') throw error; if (error.code === 'ENOENT') return null; throw error; }
+  }
+  let handle;
+  try {
+    const noFollow = fs.constants.O_NOFOLLOW || 0;
+    handle = await fsp.open(absolute, fs.constants.O_RDONLY | noFollow);
+  } catch (error) { if (error.code === 'ENOENT') return null; if (error.code === 'ELOOP') fail('symlink_refused'); throw error; }
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) fail('not_regular_file');
+    if (before.size > MAX_BYTES) fail('document_too_large');
+    const pieces = []; let total = 0; const chunk = Buffer.alloc(64 * 1024);
+    while (total <= MAX_BYTES) {
+      const length = Math.min(chunk.length, MAX_BYTES + 1 - total);
+      const { bytesRead } = await handle.read(chunk, 0, length, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > MAX_BYTES) fail('document_too_large');
+      pieces.push(Buffer.from(chunk.subarray(0, bytesRead)));
+    }
+    const after = await handle.stat();
+    if (statIdentity(before) !== statIdentity(after) || total !== after.size) fail('file_changed_during_check');
+    let final = root;
+    for (const part of rel.split(path.sep).filter(Boolean)) {
+      final = path.join(final, part);
+      const current = await fsp.lstat(final);
+      if (current.isSymbolicLink()) fail('symlink_refused');
+      if (final === absolute && statIdentity(current) !== statIdentity(after)) fail('file_changed_during_check');
+    }
+    return Buffer.concat(pieces, total);
+  } finally { await handle.close(); }
+}
+
+function defaultGitFile(repo, commit, relative) {
+  return execFileSync('git', ['-C', repo, 'show', `${commit}:${relative}`], {
+    encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_BYTES + 1,
+  });
+}
+function defaultIsAncestor(repo, older, newer) {
+  try {
+    execFileSync('git', ['-C', repo, 'merge-base', '--is-ancestor', older, newer], { stdio: 'ignore' });
+    return true;
+  } catch (error) { if (error.status === 1) return false; throw error; }
+}
+
+function priorsProjection(meta) {
+  const id = meta?.document_id;
+  const version = Number(meta?.version ?? meta?.head_version);
+  const rawSha = meta?.sha256;
+  return {
+    ...(typeof id === 'string' ? { document_id: id } : {}),
+    ...(Number.isSafeInteger(version) && version > 0 ? { version } : {}),
+    ...(typeof rawSha === 'string' && SHA256_RE.test(rawSha) ? { sha256: rawSha } : {}),
+    audit_note: typeof meta?.audit_note === 'string' ? meta.audit_note : null,
+  };
+}
+
+function readSourceTuple(meta) {
+  const source = meta?.local_source;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  if (typeof source.repo !== 'string' || !REPO_ID_RE.test(source.repo)
+      || typeof source.path !== 'string' || typeof source.mode !== 'string'
+      || !['branch', 'commit', 'worktree'].includes(source.mode)
+      || typeof source.ref !== 'string' || source.ref.length < 1 || source.ref.length > 160
+      || !/^[A-Za-z0-9._/-]+$/.test(source.ref)
+      || source.ref.startsWith('/') || source.ref.includes('//') || source.ref.includes('\\') || source.ref.includes(':')
+      || source.ref.split('/').some((part) => !part || part === '.' || part === '..')
+      || typeof source.commit !== 'string' || !OID_RE.test(source.commit)
+      || typeof source.sha256 !== 'string' || !SHA256_RE.test(source.sha256)
+      || !['raw-v1', 'utf8-crlf-lf-v1'].includes(source.comparison_profile)) return null;
+  if (source.mode === 'commit' && source.ref !== source.commit) return null;
+  if (source.mode === 'worktree' && source.ref !== 'HEAD') return null;
+  try { safeRepoPath(process.cwd(), source.path); } catch { return null; }
+  return source;
+}
+
+/** Resolve only the explicitly pinned source path from normal document-read metadata. This never writes or scans. */
+async function resolveDocument(meta, repoArg, repoId, deps = {}) {
+  const priors = priorsProjection(meta);
+  const noSource = (reason) => ({ state: 'no_source', reason, ...priors });
+  if (typeof repoId !== 'string' || !REPO_ID_RE.test(repoId)) return noSource('repository_id_invalid');
+  const source = readSourceTuple(meta);
+  if (!source) return noSource('comparison_metadata_missing_or_invalid');
+  if (source.repo !== repoId) return noSource('repository_id_mismatch');
+
+  let repo;
+  let rootIdentity;
+  try {
+    const requestedRoot = path.resolve(repoArg);
+    assertNoSymlinkPath(requestedRoot);
+    repo = fs.realpathSync(requestedRoot);
+    if (!samePath(requestedRoot, repo)) return noSource('repository_root_not_canonical');
+    const runGit = deps.git || git;
+    const gitRoot = path.resolve(runGit(repo, 'rev-parse', '--show-toplevel'));
+    if (!samePath(gitRoot, repo)) return noSource('repository_root_required');
+    rootIdentity = repoRootIdentity(repo);
+  } catch (error) {
+    if (error.code === 'symlink_refused') return noSource('repository_symlink_refused');
+    return noSource('repository_unavailable');
+  }
+
+  let absolute;
+  try { absolute = safeRepoPath(repo, source.path); }
+  catch (error) { return noSource(error.code || 'unsafe_source_path'); }
+  const localInfo = { repo: source.repo, path: source.path, mode: source.mode, ref: source.ref, commit: source.commit,
+    source_sha256: source.sha256, comparison_profile: source.comparison_profile,
+    local_path: absolute, ...priors };
+  const readFile = async () => {
+    repoRootIdentity(repo, rootIdentity);
+    const bytes = await readBoundedStableFile(repo, source.path, absolute);
+    repoRootIdentity(repo, rootIdentity);
+    return bytes;
+  };
+  let localBytes;
+  try { localBytes = await readFile(); }
+  catch (error) {
+    if (error.code === 'symlink_refused') return noSource('symlink_refused');
+    if (error.code === 'repository_changed') return noSource('repository_changed');
+    throw error;
+  }
+  if (localBytes === null) {
+    try { if (await readFile() !== null) fail('file_changed_during_check'); }
+    catch (error) { if (error.code === 'repository_changed') return noSource('repository_changed'); throw error; }
+    return { state: 'missing', ...localInfo };
+  }
+  const localSha = sha256(localBytes);
+  const responseSha = priors.sha256;
+  const samePriorsBytes = !!responseSha && localSha === responseSha;
+  const runGit = deps.git || git;
+  const getGitFile = deps.gitFile || defaultGitFile;
+  const isAncestor = deps.isAncestor || defaultIsAncestor;
+  const complete = async (state, reason, profile = 'raw-v1', historyProof = null) => {
+    let finalBytes;
+    try { finalBytes = await readFile(); }
+    catch (error) { if (error.code === 'repository_changed') return noSource('repository_changed'); throw error; }
+    if (finalBytes === null || sha256(finalBytes) !== localSha) fail('file_changed_during_check');
+    let localCommit;
+    if (historyProof) {
+      try {
+        localCommit = runGit(repo, 'rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}');
+        const finalStatus = runGit(repo, 'status', '--porcelain', '--untracked-files=all', '--', source.path);
+        if (localCommit !== historyProof.head || finalStatus) {
+          return { state: 'different', reason: 'head_changed', ...localInfo, local_sha256: localSha,
+            matches_priors_bytes: samePriorsBytes, verified_comparison_profile: historyProof.profile };
+        }
+      } catch {
+        return { state: 'different', reason: 'head_changed', ...localInfo, local_sha256: localSha,
+          matches_priors_bytes: samePriorsBytes, verified_comparison_profile: historyProof.profile };
+      }
+    }
+    return { state, ...(reason ? { reason } : {}), ...localInfo, local_sha256: localSha,
+      ...(localCommit ? { local_commit: localCommit } : {}),
+      matches_priors_bytes: samePriorsBytes, verified_comparison_profile: profile };
+  };
+
+  if (localSha === source.sha256) {
+    return complete('source_match', null, 'raw-v1');
+  }
+
+  let pinnedBytes;
+  try {
+    pinnedBytes = Buffer.from(await getGitFile(repo, source.commit, source.path));
+    if (pinnedBytes.length > MAX_BYTES || sha256(pinnedBytes) !== source.sha256) return complete('different', 'source_commit_hash_mismatch');
+  } catch { return complete('different', 'source_commit_unavailable'); }
+
+  if (source.comparison_profile === 'utf8-crlf-lf-v1') {
+    try {
+      if (normalizeLf(localBytes).equals(normalizeLf(pinnedBytes))) {
+        return complete('source_match', null, 'utf8-crlf-lf-v1');
+      }
+    } catch (error) {
+      if (error.code === 'file_changed_during_check') throw error;
+      // Invalid UTF-8 cannot use newline normalization; continue with raw-history classification.
+    }
+  }
+
+  let head;
+  try { head = runGit(repo, 'rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}'); }
+  catch { return complete('different', 'head_unavailable'); }
+  let worktreeStatus;
+  try { worktreeStatus = runGit(repo, 'status', '--porcelain', '--untracked-files=all', '--', source.path); }
+  catch { return complete('different', 'worktree_status_unavailable'); }
+  if (worktreeStatus) return complete('different', 'dirty_worktree');
+  let headBytes;
+  try { headBytes = Buffer.from(await getGitFile(repo, head, source.path)); }
+  catch { return complete('different', 'path_not_in_head'); }
+  let headProfile = 'raw-v1';
+  let headMatchesLocal = headBytes.length <= MAX_BYTES && headBytes.equals(localBytes);
+  if (!headMatchesLocal && source.comparison_profile === 'utf8-crlf-lf-v1') {
+    try {
+      headMatchesLocal = headBytes.length <= MAX_BYTES && normalizeLf(headBytes).equals(normalizeLf(localBytes));
+      if (headMatchesLocal) headProfile = 'utf8-crlf-lf-v1';
+    } catch { /* Invalid UTF-8 cannot use the declared newline profile. */ }
+  }
+  if (!headMatchesLocal) return complete('different', 'worktree_differs_from_head');
+
+  let sourceIsAncestor, headIsAncestor;
+  try {
+    sourceIsAncestor = await isAncestor(repo, source.commit, head);
+    headIsAncestor = await isAncestor(repo, head, source.commit);
+  } catch { return complete('different', 'history_unavailable'); }
+  const historyProof = { head, profile: headProfile };
+  if (sourceIsAncestor && !headIsAncestor) return complete('newer', 'head_descends_from_source', headProfile, historyProof);
+  if (headIsAncestor && !sourceIsAncestor) return complete('older', 'source_descends_from_head', headProfile, historyProof);
+  return complete('different', sourceIsAncestor && headIsAncestor ? 'same_commit_content_differs' : 'diverged_history', headProfile, historyProof);
+}
+
+async function readMetadataFile(file) {
+  const absolute = path.resolve(file);
+  assertNoSymlinkPath(absolute);
+  let handle;
+  try { handle = await fsp.open(absolute, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)); }
+  catch (error) { if (error.code === 'ELOOP') fail('metadata_symlink_refused'); throw error; }
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size > MAX_BYTES) fail('metadata_file_invalid');
+    const chunks = []; let total = 0; const chunk = Buffer.alloc(64 * 1024);
+    while (total <= MAX_BYTES) {
+      const length = Math.min(chunk.length, MAX_BYTES + 1 - total);
+      const { bytesRead } = await handle.read(chunk, 0, length, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > MAX_BYTES) fail('metadata_file_invalid');
+      chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+    }
+    const bytes = Buffer.concat(chunks, total);
+    const after = await handle.stat();
+    if (bytes.length > MAX_BYTES || statIdentity(before) !== statIdentity(after) || bytes.length !== after.size) fail('metadata_file_changed');
+    const pathStat = await fsp.lstat(absolute);
+    if (pathStat.isSymbolicLink() || statIdentity(pathStat) !== statIdentity(after)) fail('metadata_file_changed');
+    let parsed;
+    try { parsed = JSON.parse(bytes.toString('utf8')); } catch { fail('metadata_json_invalid'); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('metadata_json_invalid');
+    return parsed;
+  } finally { await handle.close(); }
+}
+
+function selectMetadataRow(payload, options) {
+  const candidates = Array.isArray(payload.items) ? payload.items : [payload];
+  const rows = candidates.filter((row) => row && typeof row === 'object' && !Array.isArray(row)
+    && (options.id ? row.document_id === options.id : row.document_key === options.key));
+  if (rows.length !== 1) fail('metadata_document_not_unique');
+  return rows[0];
+}
+
+async function resolveCommand(options, deps = {}) {
+  if (!options.theme || !options.repo || !options.repoId || (!!options.id === !!options.key)) fail('usage');
+  if (options.version !== undefined && (!Number.isSafeInteger(options.version) || options.version < 1)) fail('usage');
+  let meta;
+  const origin = options.metadata ? 'captured_metadata' : 'live_read';
+  if (options.metadata) {
+    meta = selectMetadataRow(await readMetadataFile(options.metadata), options);
+    const version = Number(meta?.version ?? meta?.head_version);
+    if (typeof meta?.document_id !== 'string' || !UUID_RE.test(meta.document_id)
+        || !Number.isSafeInteger(version) || version < 1
+        || typeof meta?.sha256 !== 'string' || !SHA256_RE.test(meta.sha256)) {
+      return { state: 'no_source', reason: 'captured_document_identity_invalid', ...priorsProjection(meta), metadata_origin: origin };
+    }
+    if (options.version && version !== options.version) {
+      return { state: 'no_source', reason: 'requested_version_mismatch', ...priorsProjection(meta), metadata_origin: origin };
+    }
+  } else {
+    const target = options.id ? { document_id: options.id } : { document_key: options.key };
+    const callTool = deps.tool || tool;
+    meta = await callTool('document', { action: 'read', theme: options.theme, ...target,
+      ...(options.version ? { version: options.version } : {}), max_bytes: 1, offset_bytes: 0 });
+  }
+  const returnedId = meta?.document_id;
+  if (typeof returnedId !== 'string' || !UUID_RE.test(returnedId)
+      || (options.id && returnedId !== options.id)
+      || (options.key && meta?.document_key !== options.key)) {
+    return { state: 'no_source', reason: 'requested_document_mismatch', ...priorsProjection(meta), metadata_origin: origin };
+  }
+  const returnedVersion = Number(meta?.version ?? meta?.head_version);
+  if (!Number.isSafeInteger(returnedVersion) || returnedVersion < 1 || typeof meta?.sha256 !== 'string' || !SHA256_RE.test(meta.sha256)) {
+    return { state: 'no_source', reason: 'document_identity_invalid', ...priorsProjection(meta), metadata_origin: origin };
+  }
+  if (options.version && returnedVersion !== options.version) return { state: 'no_source', reason: 'requested_version_mismatch', ...priorsProjection(meta), metadata_origin: origin };
+  return { ...(await resolveDocument(meta, options.repo, options.repoId, deps)), metadata_origin: origin };
+}
+
+function parseResolve(argv) {
+  const out = {};
+  for (let i = 1; i < argv.length; i += 2) {
+    const key = argv[i], value = argv[i + 1];
+    if (!['--theme', '--id', '--key', '--repo', '--repo-id', '--version', '--metadata'].includes(key) || value === undefined || key in out) fail('usage');
+    out[key.slice(2).replace(/-([a-z])/g, (_m, c) => c.toUpperCase())] = key === '--version' ? Number(value) : value;
+  }
+  if (out.version !== undefined && (!Number.isSafeInteger(out.version) || out.version < 1)) fail('usage');
+  if (!out.theme || !out.repo || !out.repoId || (!!out.id === !!out.key)) fail('usage');
+  return out;
+}
 async function auditManifest(manifestFile, repoArg, ref, sourceMode = 'branch', deps = {}) {
   const repo = fs.realpathSync(path.resolve(repoArg));
   const runGit = deps.git || git;
@@ -584,6 +928,7 @@ function parse(argv) {
   return { cmd, file, o };
 }
 async function main(argv) {
+  if (argv[0] === 'resolve') return resolveCommand(parseResolve(argv));
   if (argv[0] === 'audit') {
     const opts = {}; for (let i = 1; i < argv.length; i += 2) { const k = argv[i], v = argv[i + 1];
       if (!['--manifest', '--repo', '--ref', '--source-mode'].includes(k) || v === undefined) fail('usage'); opts[k.slice(2)] = v; }
@@ -597,7 +942,8 @@ async function main(argv) {
   if (cmd === 'fetch') return fetchDoc(file, o);
   fail('usage');
 }
-module.exports = { classify, safePath, sha256, replaceWithoutLoss, normalizeLf, repoPath, auditManifest, gitMerge };
+module.exports = { classify, safePath, sha256, replaceWithoutLoss, normalizeLf, repoPath, safeRepoPath,
+  auditManifest, resolveDocument, resolveCommand, readMetadataFile, parseResolve, gitMerge };
 if (require.main === module) {
   main(process.argv.slice(2)).then((v) => process.stdout.write(JSON.stringify(v) + '\n'))
     .catch((e) => { process.stderr.write(JSON.stringify({ error: e.code || 'document_sync_failed', ...(e.extra || {}) }) + '\n'); process.exitCode = 1; });

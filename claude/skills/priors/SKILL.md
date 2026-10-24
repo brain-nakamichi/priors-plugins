@@ -74,6 +74,12 @@ Priorsを使う場合、読取・書込に必要な session / theme の確認方
 - instructions の `features` にあれば: 外れそうな問いは `query_variants`（言い換え≤3）、現況は `view: current`（要約で正解ではない）、絞るなら `response_mode: compact`（省略本文は `get`）。
 - Markdown 原文は`document`へ（`search`で探す・更新は期待版とsha256付き・他主体の文書は自分のkeyで別作成）。記憶は`refs.documents`（版・sha256固定）で参照。`related_documents`は本文なし。同期は`scripts/document-sync.js`。
 
+### ローカル文書の所在を確認する場合（任意）
+
+ローカルファイルの場所やPriors本文との差が今回役立つ場合だけ、`node scripts/document-sync.js resolve --theme T (--id UUID | --key K) --repo <repository-root> --repo-id <audit-repository-label> [--version N] [--metadata <search-or-read-json>]`を使えます。通常は小さい`document` readを使います。直前のsearch/read応答を保存済みなら、1 MiB以下のJSON metadataファイルを`--metadata`で指定して追加MCP呼出しを省けます。結果は`metadata_origin: captured_metadata`と明示し、保存済み応答から現在のPriors状態や権限を再確認したとは扱いません。完全な`local_source` tupleを、指定repo label・明示rootと照合します。対象はtupleに記録されたMarkdownパスだけです。本文を取得・表示・送信せず、書込・同期・fallback選択もしません。
+
+`source_match`は記録されたrepo sourceとローカルbytesがrawまたは明示された改行profileで一致した意味です。別に返るPriors `sha256`は文書本文hashであり、`matches_priors_bytes`がtrueのときだけローカルraw bytesと同じです。source metadataが無い・古い版・履歴を証明できない・dirty/diverged worktreeなら場所の同一性を推測せず、`no_source`または`different`を返します。直接ファイルが既知ならそのファイルを読めます。所在が不明なら`document search`や必要に応じた履歴検索も候補です。このresolveを含む機能の順序は固定しません。
+
 ### エージェントの作業メモ（working cache）
 - 新しいセッション、テーマ切替、圧縮後は `working_cache_read` を読み、`task_key` か `work_id` が一致するメモだけを `get` する。更新日時だけで選ばない。
 - 相談の問い・目的・条件、提案・未確認・進捗を同じメモへ。`replace`は全置換なので元の条件も書き戻す。版競合は再取得、未完了メモは捨てない。

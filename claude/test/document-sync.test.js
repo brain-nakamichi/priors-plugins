@@ -9,7 +9,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'document-sync.js');
-const { classify, normalizeLf, repoPath, auditManifest, gitMerge } = require(SCRIPT);
+const { classify, normalizeLf, repoPath, auditManifest, resolveDocument, resolveCommand, parseResolve, gitMerge } = require(SCRIPT);
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 test('Claude and Codex plugin package versions and audit scripts stay aligned', () => {
@@ -25,9 +25,207 @@ test('Claude and Codex plugin package versions and audit scripts stay aligned', 
     require(path.join(root, 'codex-plugins/marketplace.json')).metadata.version,
     require(path.join(root, 'codex-plugins/marketplace.json')).version,
   ];
-  assert.deepEqual(versions, Array(9).fill('0.1.56'));
+  assert.deepEqual(versions, Array(9).fill('0.1.57'));
   assert.equal(fs.readFileSync(path.join(root, 'plugin/scripts/document-sync.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'codex-plugins/priors/scripts/document-sync.js'), 'utf8'));
+});
+
+async function resolveFixture(t, { sourceBytes = Buffer.from('pinned\n'), localBytes = sourceBytes,
+  documentBytes = sourceBytes, sourceOverrides = {}, dirty = false, ancestry = 'newer', sourceAvailable = true,
+  mutateDuringGitRead = false, headBytes = localBytes, changeHeadAfterAncestry = false, changeRootAfterAncestry = false } = {}) {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'priors-resolve-'));
+  t.after(() => fs.promises.rm(dir, { recursive: true, force: true }));
+  const repo = path.join(dir, 'repo'); await fs.promises.mkdir(path.join(repo, 'docs'), { recursive: true });
+  const abs = path.join(repo, 'docs', 'a.md'); await fs.promises.writeFile(abs, localBytes);
+  const sourceCommit = 'a'.repeat(40), headCommit = 'b'.repeat(40);
+  const source = { repo: 'priors', path: 'docs/a.md', mode: 'branch', ref: 'main', commit: sourceCommit,
+    sha256: sha(sourceBytes), comparison_profile: 'raw-v1', ...sourceOverrides };
+  const meta = { document_id: '432c36d9-37cc-4f9f-853d-693a56401a21', version: 9, sha256: sha(documentBytes),
+    audit_note: null, local_source: source };
+  let mutated = false; let currentHead = headCommit;
+  const deps = {
+    git: (_root, ...args) => {
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return repo;
+      if (args[0] === 'rev-parse' && args.includes('HEAD^{commit}')) return currentHead;
+      if (args[0] === 'status') return dirty ? ' M docs/a.md' : '';
+      throw new Error('unexpected git command');
+    },
+    gitFile: async (_root, commit, relative) => {
+      assert.equal(relative, 'docs/a.md');
+      if (mutateDuringGitRead && !mutated) { mutated = true; await fs.promises.writeFile(abs, Buffer.from('raced\n')); }
+      if (commit === sourceCommit && sourceAvailable) return sourceBytes;
+      if (commit === headCommit) return headBytes;
+      throw new Error('commit unavailable');
+    },
+    isAncestor: async (_root, older, newer) => {
+      if (changeHeadAfterAncestry) currentHead = 'c'.repeat(40);
+      if (changeRootAfterAncestry) {
+        changeRootAfterAncestry = false;
+        const moved = `${repo}-moved`;
+        await fs.promises.rename(repo, moved);
+        await fs.promises.mkdir(repo);
+      }
+      if (ancestry === 'newer') return older === sourceCommit && newer === headCommit;
+      if (ancestry === 'older') return older === headCommit && newer === sourceCommit;
+      if (ancestry === 'same') return older === newer;
+      if (ancestry === 'diverged') return false;
+      throw new Error('history unavailable');
+    },
+  };
+  return { dir, repo, abs, meta, sourceCommit, headCommit, sourceBytes, localBytes, deps };
+}
+
+test('resolve uses the normal one-byte document read and returns an explicit source match with distinct Priors hash', async (t) => {
+  const f = await resolveFixture(t, { documentBytes: Buffer.from('different Priors body\n') });
+  let call;
+  const out = await resolveCommand({ theme: 'GEN', id: f.meta.document_id, repo: f.repo, repoId: 'priors', version: 9 }, {
+    ...f.deps, tool: async (name, args) => { call = { name, args }; return f.meta; },
+  });
+  assert.equal(call.name, 'document');
+  assert.deepEqual(call.args, { action: 'read', theme: 'GEN', document_id: f.meta.document_id, version: 9, max_bytes: 1, offset_bytes: 0 });
+  assert.equal(out.state, 'source_match');
+  assert.equal(out.local_path, f.abs);
+  assert.equal(out.local_sha256, sha(f.sourceBytes));
+  assert.equal(out.source_sha256, sha(f.sourceBytes));
+  assert.equal(out.sha256, sha(Buffer.from('different Priors body\n')), 'sha256 is the Priors document-body hash');
+  assert.equal(out.version, 9);
+  assert.equal(out.document_id, f.meta.document_id);
+  assert.equal(out.matches_priors_bytes, false);
+  assert.equal(out.audit_note, null);
+  assert.equal(out.metadata_origin, 'live_read');
+});
+
+test('resolve fails closed if the normal read does not match the requested Priors ID or version', async (t) => {
+  const f = await resolveFixture(t);
+  const baseOptions = { theme: 'GEN', id: f.meta.document_id, repo: f.repo, repoId: 'priors', version: 9 };
+  const wrongId = await resolveCommand(baseOptions, { ...f.deps, tool: async () => ({ ...f.meta, document_id: 'other' }) });
+  assert.equal(wrongId.state, 'no_source'); assert.equal(wrongId.reason, 'requested_document_mismatch');
+  const wrongVersion = await resolveCommand(baseOptions, { ...f.deps, tool: async () => ({ ...f.meta, version: 8 }) });
+  assert.equal(wrongVersion.state, 'no_source'); assert.equal(wrongVersion.reason, 'requested_version_mismatch');
+});
+
+test('resolve returns no_source without local details for missing, incomplete, and mismapped metadata', async (t) => {
+  const f = await resolveFixture(t);
+  const noTuple = await resolveDocument({ ...f.meta, local_source: undefined }, f.repo, 'priors', f.deps);
+  assert.equal(noTuple.state, 'no_source'); assert.equal(noTuple.version, 9); assert.equal(noTuple.local_path, undefined);
+  const badTuple = await resolveDocument({ ...f.meta, local_source: { ...f.meta.local_source, path: '../secret' } }, f.repo, 'priors', f.deps);
+  assert.equal(badTuple.state, 'no_source'); assert.equal(badTuple.local_path, undefined);
+  const mismatch = await resolveDocument(f.meta, f.repo, 'other-repo', f.deps);
+  assert.equal(mismatch.state, 'no_source'); assert.equal(mismatch.reason, 'repository_id_mismatch');
+  assert.equal(mismatch.local_path, undefined);
+});
+
+test('resolve distinguishes missing files and refuses unknown pinned source commits', async (t) => {
+  const missing = await resolveFixture(t); await fs.promises.rm(missing.abs);
+  const absent = await resolveDocument(missing.meta, missing.repo, 'priors', missing.deps);
+  assert.equal(absent.state, 'missing'); assert.equal(absent.local_path, missing.abs);
+  const unknown = await resolveFixture(t, { sourceBytes: Buffer.from('audit source\n'), localBytes: Buffer.from('worktree\n'), sourceAvailable: false });
+  const different = await resolveDocument(unknown.meta, unknown.repo, 'priors', unknown.deps);
+  assert.equal(different.state, 'different'); assert.equal(different.reason, 'source_commit_unavailable');
+});
+
+test('resolve classifies older/newer only for clean HEAD bytes with proven ancestry', async (t) => {
+  const older = await resolveFixture(t, { sourceBytes: Buffer.from('new source\n'), localBytes: Buffer.from('old HEAD\n'), ancestry: 'older' });
+  const old = await resolveDocument(older.meta, older.repo, 'priors', older.deps);
+  assert.equal(old.state, 'older'); assert.equal(old.reason, 'source_descends_from_head');
+  const newer = await resolveFixture(t, { sourceBytes: Buffer.from('old source\n'), localBytes: Buffer.from('new HEAD\n'), ancestry: 'newer' });
+  const fresh = await resolveDocument(newer.meta, newer.repo, 'priors', newer.deps);
+  assert.equal(fresh.state, 'newer'); assert.equal(fresh.reason, 'head_descends_from_source');
+  const dirty = await resolveFixture(t, { sourceBytes: Buffer.from('source\n'), localBytes: Buffer.from('edited\n'), dirty: true });
+  assert.equal((await resolveDocument(dirty.meta, dirty.repo, 'priors', dirty.deps)).reason, 'dirty_worktree');
+  const diverged = await resolveFixture(t, { sourceBytes: Buffer.from('source\n'), localBytes: Buffer.from('edited\n'), ancestry: 'diverged' });
+  assert.equal((await resolveDocument(diverged.meta, diverged.repo, 'priors', diverged.deps)).reason, 'diverged_history');
+  const headDiff = await resolveFixture(t, { sourceBytes: Buffer.from('source\n'), localBytes: Buffer.from('edited\n') });
+  headDiff.deps.gitFile = async (_root, commit) => commit === headDiff.sourceCommit ? headDiff.sourceBytes : Buffer.from('different HEAD blob');
+  assert.equal((await resolveDocument(headDiff.meta, headDiff.repo, 'priors', headDiff.deps)).reason, 'worktree_differs_from_head');
+});
+
+test('resolve supports declared CRLF normalization only against raw-hash-verified pinned Git bytes', async (t) => {
+  const sourceBytes = Buffer.from('one\ntwo\n');
+  const f = await resolveFixture(t, { sourceBytes, localBytes: Buffer.from('one\r\ntwo\r\n'),
+    sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' } });
+  const out = await resolveDocument(f.meta, f.repo, 'priors', f.deps);
+  assert.equal(out.state, 'source_match');
+  assert.equal(out.verified_comparison_profile, 'utf8-crlf-lf-v1');
+  assert.equal(out.matches_priors_bytes, false);
+  const wrongRawPin = await resolveFixture(t, { sourceBytes, localBytes: Buffer.from('one\r\ntwo\r\n'),
+    sourceOverrides: { sha256: 'f'.repeat(64), comparison_profile: 'utf8-crlf-lf-v1' } });
+  const rejected = await resolveDocument(wrongRawPin.meta, wrongRawPin.repo, 'priors', wrongRawPin.deps);
+  assert.equal(rejected.state, 'different'); assert.equal(rejected.reason, 'source_commit_hash_mismatch');
+});
+
+test('resolve allows history labels for declared clean CRLF worktrees and rechecks HEAD before returning them', async (t) => {
+  const sourceBytes = Buffer.from('source\n'), localBytes = Buffer.from('head\n');
+  const crlfHead = await resolveFixture(t, { sourceBytes, localBytes: Buffer.from('head\r\n'), headBytes: Buffer.from('head\n'),
+    sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' }, ancestry: 'newer' });
+  const newer = await resolveDocument(crlfHead.meta, crlfHead.repo, 'priors', crlfHead.deps);
+  assert.equal(newer.state, 'newer');
+  assert.equal(newer.verified_comparison_profile, 'utf8-crlf-lf-v1');
+  assert.equal(newer.local_commit, crlfHead.headCommit);
+  const raced = await resolveFixture(t, { sourceBytes, localBytes, headBytes: localBytes,
+    sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' }, ancestry: 'newer', changeHeadAfterAncestry: true });
+  const changed = await resolveDocument(raced.meta, raced.repo, 'priors', raced.deps);
+  assert.equal(changed.state, 'different'); assert.equal(changed.reason, 'head_changed');
+  assert.equal(changed.local_commit, undefined);
+  const rootRace = await resolveFixture(t, { sourceBytes, localBytes, ancestry: 'newer', changeRootAfterAncestry: true });
+  const replaced = await resolveDocument(rootRace.meta, rootRace.repo, 'priors', rootRace.deps);
+  assert.equal(replaced.state, 'no_source'); assert.equal(replaced.reason, 'repository_changed');
+});
+
+test('resolve accepts explicit bounded search metadata offline without another MCP call', async (t) => {
+  const f = await resolveFixture(t);
+  const metadataFile = path.join(f.dir, 'search-result.json');
+  await fs.promises.writeFile(metadataFile, JSON.stringify({ items: [f.meta] }));
+  let calls = 0;
+  const out = await resolveCommand({ theme: 'GEN', id: f.meta.document_id, repo: f.repo, repoId: 'priors', metadata: metadataFile }, {
+    ...f.deps, tool: async () => { calls++; throw new Error('offline metadata must not call MCP'); },
+  });
+  assert.equal(out.state, 'source_match'); assert.equal(calls, 0);
+  assert.equal(out.metadata_origin, 'captured_metadata');
+  const parsed = parseResolve(['resolve', '--theme', 'GEN', '--id', f.meta.document_id, '--repo', f.repo,
+    '--repo-id', 'priors', '--metadata', metadataFile]);
+  assert.equal(parsed.metadata, metadataFile);
+  await fs.promises.writeFile(metadataFile, JSON.stringify({ items: [f.meta, f.meta] }));
+  await assert.rejects(resolveCommand({ theme: 'GEN', id: f.meta.document_id, repo: f.repo, repoId: 'priors', metadata: metadataFile }, f.deps),
+    /metadata_document_not_unique/);
+  for (const invalid of [
+    { ...f.meta, document_key: 'docs/a.md', document_id: undefined },
+    { ...f.meta, document_key: 'docs/a.md', version: undefined },
+    { ...f.meta, document_key: 'docs/a.md', sha256: undefined },
+  ]) {
+    await fs.promises.writeFile(metadataFile, JSON.stringify(invalid));
+    const result = await resolveCommand({ theme: 'GEN', key: 'docs/a.md', repo: f.repo, repoId: 'priors', metadata: metadataFile }, f.deps);
+    assert.equal(result.state, 'no_source'); assert.equal(result.reason, 'captured_document_identity_invalid');
+    assert.equal(result.local_path, undefined); assert.equal(result.metadata_origin, 'captured_metadata');
+  }
+  await fs.promises.writeFile(metadataFile, Buffer.alloc(1048577));
+  await assert.rejects(resolveCommand({ theme: 'GEN', id: f.meta.document_id, repo: f.repo, repoId: 'priors', metadata: metadataFile }, f.deps),
+    /metadata_file_invalid/);
+  const metadataLink = path.join(f.dir, 'metadata-link.json');
+  try {
+    await fs.promises.symlink(metadataFile, metadataLink);
+    await assert.rejects(resolveCommand({ theme: 'GEN', id: f.meta.document_id, repo: f.repo, repoId: 'priors', metadata: metadataLink }, f.deps),
+      /symlink_refused/);
+  } catch (error) { if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error; }
+});
+
+test('resolve rejects unsafe/symlink paths, oversized files, and files changed during verification', async (t) => {
+  const f = await resolveFixture(t);
+  for (const relative of ['../secret', 'CON', 'folder./x.md', 'C:/secret', '.git/config.md', '.env.local.md', 'docs/token.txt']) {
+    const bad = await resolveDocument({ ...f.meta, local_source: { ...f.meta.local_source, path: relative } }, f.repo, 'priors', f.deps);
+    assert.equal(bad.state, 'no_source');
+  }
+  const large = await resolveFixture(t, { localBytes: Buffer.alloc(1048577), sourceBytes: Buffer.from('pinned') });
+  await assert.rejects(resolveDocument(large.meta, large.repo, 'priors', large.deps), /document_too_large/);
+  const raced = await resolveFixture(t, { sourceBytes: Buffer.from('other source'), localBytes: Buffer.from('at HEAD'), mutateDuringGitRead: true });
+  await assert.rejects(resolveDocument(raced.meta, raced.repo, 'priors', raced.deps), /file_changed_during_check/);
+  const symlink = path.join(f.repo, 'docs', 'link.md');
+  try {
+    await fs.promises.symlink(f.abs, symlink);
+    const linkMeta = { ...f.meta, local_source: { ...f.meta.local_source, path: 'docs/link.md' } };
+    const refused = await resolveDocument(linkMeta, f.repo, 'priors', f.deps);
+    assert.equal(refused.state, 'no_source'); assert.equal(refused.reason, 'symlink_refused');
+  } catch (error) { if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error; }
 });
 
 test('audit helpers normalize only CRLF and reject unsafe repository paths', () => {

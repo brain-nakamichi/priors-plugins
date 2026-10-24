@@ -51,6 +51,12 @@ Only a memory's owner can directly edit, retract, supersede, pin, split, merge, 
 
 ## Load details only when relevant
 
+### Optional local document resolution
+
+When locating a local file or distinguishing its repository source from the Priors document is useful, run `node scripts/document-sync.js resolve --theme T (--id UUID | --key K) --repo <repository-root> --repo-id <audit-repository-label> [--version N] [--metadata <search-or-read-json>]`. Normally it uses a small `document` read response. If a recent search/read response is already saved, `--metadata` accepts a bounded JSON metadata file and skips another MCP call. The result marks this as `metadata_origin: captured_metadata`; it does not recheck current Priors state or reauthenticate permissions. It uses only the complete `local_source` tuple, matched against the explicitly supplied repository label and root. It checks only that recorded Markdown path. It does not fetch, display, or send the body, write, sync, or choose a fallback.
+
+`source_match` means local bytes match the recorded repository source under its raw or explicitly declared newline profile. The separate Priors `sha256` is the document-body hash; `matches_priors_bytes` is true only when the local raw bytes equal it. Missing source metadata, non-current versions, unprovable history, and dirty or diverged worktrees do not justify guessing a local location; return `no_source` or `different`. Read a known file directly. When its location is unknown, document search or relevant history retrieval may help. Choose the useful functions in context; this is not a fixed sequence.
+
 - For write contracts, retries, version conflicts, capacity errors, cross-client handoffs, `document` use, re-reading themes with `theme_list`, optional search features (`query_variants`, `view: current`, compact responses), `refs.observations`, and plugin-version checks, read [daily cross-client route](daily-cross-client-route.md). For continuing-request and search-card contracts, read [retention and search cards](retention-and-search-cards.md).
 - For organizing a theme or changing a memory's relations, read [theme organization](theme-organization.md).
 - For short-lived work state and peer handoffs, read [working cache](working-cache.md).
