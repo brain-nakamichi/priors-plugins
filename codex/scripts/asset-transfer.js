@@ -47,7 +47,15 @@ function publicReceipt(row, replayed) {
   const { operation_id, stage, upload_id, local_path, filename, byte_size, sha256, asset_id, failure_state, updated_at } = row;
   return { operation_id, stage, upload_id, local_path, filename, byte_size, sha256, asset_id, failure_state, updated_at, replayed };
 }
-function safeName(value) { const name = path.basename(String(value)); if (!name || name === '.' || name === '..' || /[\0<>:"/\\|?*]/u.test(name)) fail('invalid_filename'); return name; }
+function safeName(value) {
+  if (typeof value !== 'string') fail('invalid_filename');
+  const name = path.basename(value);
+  if (!name || name === '.' || name === '..' || /[\0<>:"/\\|?*]/u.test(name)) fail('invalid_filename');
+  const windowsName = name.replace(/[. ]+$/u, '');
+  const stem = (windowsName.split('.', 1)[0] || '').replace(/[. ]+$/u, '');
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu.test(stem)) fail('invalid_filename');
+  return name;
+}
 function mediaType(name) { const ext = path.extname(name).toLowerCase(); return ({'.md':'text/markdown','.txt':'text/plain','.csv':'text/csv','.json':'application/json','.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})[ext] || 'application/octet-stream'; }
 async function readState() { try { return JSON.parse(await fsp.readFile(stateFile(), 'utf8')); } catch { return {}; } }
 async function writeState(state) { const file = stateFile(); await fsp.mkdir(path.dirname(file), { recursive: true }); const tmp = `${file}.tmp-${process.pid}`; await fsp.writeFile(tmp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 }); await fsp.rename(tmp, file); }
@@ -77,11 +85,37 @@ async function publish(file, themeId, idempotencyKey) {
   return publicReceipt(state[key], false);
 }
 async function fetchAsset(assetId, destination) {
+  if (typeof destination !== 'string' || !destination.trim()) fail('asset_destination_required');
+  const target = path.resolve(destination); safeName(path.basename(target));
+  const dir = path.dirname(target);
+  try { await fsp.lstat(target); fail('asset_destination_exists'); }
+  catch (error) {
+    if (error?.code === 'asset_destination_exists') throw error;
+    if (error?.code !== 'ENOENT') fail('asset_destination_unavailable');
+  }
   const status = await (await request(`${endpoint()}/${encodeURIComponent(assetId)}/status`)).json(); if (status?.state !== 'available') fail('asset_not_available');
-  const filename = safeName(status.original_filename || `${assetId}.bin`); const target = path.resolve(destination || filename); const dir = path.dirname(target); await fsp.mkdir(dir, { recursive:true }); const tmp = `${target}.tmp-${process.pid}`;
-  const response = await request(`${endpoint()}/${encodeURIComponent(assetId)}/content`); const body = Buffer.from(await response.arrayBuffer()); if (body.length !== Number(status.byte_size)) fail('asset_size_mismatch');
-  const hash = crypto.createHash('sha256').update(body).digest('hex'); if (status.content_hash && String(status.content_hash).replace(/^\\x/u,'') !== hash) fail('asset_hash_mismatch');
-  await fsp.writeFile(tmp, body, { mode:0o600 }); await fsp.rename(tmp, target); return { asset_id:assetId, local_path:target, filename, byte_size:body.length, sha256:hash };
+  const filename = safeName(status.original_filename || `${assetId}.bin`);
+  const response = await request(`${endpoint()}/${encodeURIComponent(assetId)}/content`);
+  const body = Buffer.from(await response.arrayBuffer());
+  if (body.length !== Number(status.byte_size)) fail('asset_size_mismatch');
+  const hash = crypto.createHash('sha256').update(body).digest('hex');
+  if (status.content_hash && String(status.content_hash).replace(/^\\x/u,'') !== hash) fail('asset_hash_mismatch');
+  await fsp.mkdir(dir, { recursive:true }).catch(() => fail('asset_destination_write_failed'));
+  const tmp = path.join(dir, `.${path.basename(target)}.tmp-${process.pid}-${crypto.randomUUID()}`);
+  try {
+    await fsp.writeFile(tmp, body, { mode:0o600, flag:'wx' });
+    try { await fsp.copyFile(tmp, target, fs.constants.COPYFILE_EXCL); }
+    catch (error) {
+      if (error?.code === 'EEXIST') fail('asset_destination_exists');
+      fail('asset_destination_write_failed');
+    }
+  } catch (error) {
+    if (error?.code === 'asset_destination_exists' || error?.code === 'asset_destination_write_failed') throw error;
+    fail('asset_destination_write_failed');
+  } finally {
+    await fsp.unlink(tmp).catch(() => {});
+  }
+  return { asset_id:assetId, local_path:target, filename, byte_size:body.length, sha256:hash };
 }
 async function main(argv) { const [command, ...args] = argv; if (command === 'publish') return publish(args[0], args[1], args[2]); if (command === 'fetch') return fetchAsset(args[0], args[1]); if (command === 'resume') { const state = await readState(); const key = args[0]; const themeId = args[1]; if (!key || !state[key]) fail('transfer_not_found'); if (!themeId) fail('asset_transfer_theme_required'); const row = state[key]; const context = requestContext(); const file = row.local_path ? path.resolve(row.local_path) : ''; if (!file) fail('resume_local_path_missing'); let bytes; try { bytes = await fsp.readFile(file); } catch { fail('resume_local_path_missing'); } if (!bytes.length || bytes.length > MAX_BYTES) fail('invalid_size'); validateBinding(row, { ...context, theme_id: String(themeId), filename: safeName(path.basename(file)), byte_size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }); if (row.stage === 'available') return publicReceipt(row, true); return publish(file, themeId, key); } fail('usage'); }
 module.exports = { safeName, mediaType, MAX_BYTES };

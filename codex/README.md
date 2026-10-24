@@ -8,11 +8,19 @@ UserPromptSubmit は毎ターン開始時に、保持基準に合う重要情報
 
 確認先は `PRIORS_PLUGIN_UPDATE_URL`、通知状態の保存先は `PRIORS_PLUGIN_UPDATE_STATE_FILE` で上書きできます。確認先は HTTPS かつ許可ホストのみ利用します。
 
-手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.55）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。
+手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に `audit` サブコマンドが含まれます（プラグイン候補版 0.1.56）。対応する server と SQL 355 がまだ無い場合は `audit_read` の段階で停止し、監査結果を書き込みません。
 
 ### Asset 転送の再開
 
+`asset-transfer.js fetch <asset_id> <destination>` は明示した保存先だけに取得します。既存ファイルやシンボリックリンクは置き換えず、保存先のベース名とAsset metadataのファイル名がWindows予約名なら停止します。
 `asset-transfer.js resume <operation_id> <theme_id>` は、元と同じ接続先・Asset token・テーマ・ファイル名・内容でだけ再開します。
+成功済みreceiptを再表示する場合も元ファイルを読み直して照合するため、再開・確認まで元ファイルを保持してください。
 接続先は `?`・`#`・URL内の認証情報を含まないベースURLを指定してください。
 旧形式の台帳に接続先の記録が無い場合は `asset_transfer_legacy_binding_missing` で停止します。
 元のreceiptを確かめ、必要な転送は新しいoperation keyで `publish` してください。旧receiptを別テーマの共有成功として扱わないでください。
+
+## 記憶サブagent pilot
+
+Claudeの定義は `Priors/plugin/agents/priors-memory.md` にあり、`priors:priors-memory` として検出されます。Codex用 `agents/priors-memory.toml` は同梱していますが、pluginからの自動検出は確認していません。親は明示theme・session・task facts・許可済みcandidate IDs・関連する親ターンの事実だけを渡し、既定12回のPriors呼出し予算を使います。receiptは親が検証し、agentの報告だけで保存成功としません。
+
+pilotのsynthetic Claude receipt testはhookの検証動作を確認するもので、実クライアントが同じsubagent eventを出す証明ではありません。Codexには現在candidateをacknowledgeするPostToolUse経路が無いため、候補はreviewまでpendingです。pilotの4 review観点と制約は [memory-agent pilot](../../docs/priors-memory-agent-pilot-20261024.md) を参照してください。

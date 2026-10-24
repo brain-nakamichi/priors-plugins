@@ -41,6 +41,89 @@ test('asset transfer publish/fetch roundtrip preserves bytes', async () => {
   } finally { await new Promise((resolve) => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test('asset fetch requires an explicit destination and refuses existing paths before network access', async (t) => {
+  let requests = 0;
+  const server = http.createServer((req, res) => { requests++; res.statusCode = 500; res.end(); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'priors-asset-fetch-path-'));
+  const existing = path.join(dir, 'existing.md'); const state = path.join(dir, 'state.json');
+  await fs.writeFile(existing, 'keep this file');
+  const env = { ...process.env, PRIORS_ASSET_ENDPOINT: 'http://127.0.0.1:' + server.address().port, PRIORS_ASSET_TOKEN: 'fetch-token', PRIORS_ASSET_TRANSFER_STATE: state };
+  const fetch = (args) => run(process.execPath, ['scripts/asset-transfer.js', 'fetch', 'asset-fetch', ...args], { cwd: path.resolve(__dirname, '..'), env });
+  try {
+    await assert.rejects(fetch([]), /asset_destination_required/);
+    await assert.rejects(fetch([existing]), /asset_destination_exists/);
+    assert.equal(await fs.readFile(existing, 'utf8'), 'keep this file');
+    assert.equal(requests, 0);
+
+    const sentinel = path.join(dir, 'sentinel.md'); const link = path.join(dir, 'link.md');
+    await fs.writeFile(sentinel, 'symlink target stays unchanged');
+    try { await fs.symlink(sentinel, link, 'file'); }
+    catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) { t.skip('symlink creation is not permitted here'); return; }
+      throw error;
+    }
+    await assert.rejects(fetch([link]), /asset_destination_exists/);
+    assert.equal((await fs.lstat(link)).isSymbolicLink(), true);
+    assert.equal(await fs.readFile(sentinel, 'utf8'), 'symlink target stays unchanged');
+    assert.equal(requests, 0);
+  } finally { await new Promise((resolve) => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('asset fetch rejects Windows reserved metadata names before downloading content', async () => {
+  const reserved = ['CON', 'prn', 'nul.txt', 'Aux.tar.gz', 'COM1.md', 'COM9.old.ext', 'lpt1', 'lpt9.', 'con .txt'];
+  let contentRequests = 0;
+  let filename = reserved[0];
+  const server = http.createServer((req, res) => {
+    if (req.url === '/asset-reserved/status') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ state: 'available', byte_size: 1, original_filename: filename }));
+      return;
+    }
+    if (req.url === '/asset-reserved/content') contentRequests++;
+    res.statusCode = 404; res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'priors-asset-reserved-'));
+  const env = { ...process.env, PRIORS_ASSET_ENDPOINT: 'http://127.0.0.1:' + server.address().port, PRIORS_ASSET_TOKEN: 'fetch-token', PRIORS_ASSET_TRANSFER_STATE: path.join(dir, 'state.json') };
+  try {
+    for (let index = 0; index < reserved.length; index++) {
+      filename = reserved[index];
+      const target = path.join(dir, 'download-' + index + '.bin');
+      await assert.rejects(run(process.execPath, ['scripts/asset-transfer.js', 'fetch', 'asset-reserved', target], { cwd: path.resolve(__dirname, '..'), env }), /invalid_filename/);
+      assert.equal(await fs.stat(target).then(() => true, () => false), false);
+    }
+    assert.equal(contentRequests, 0);
+  } finally { await new Promise((resolve) => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('asset fetch exclusively installs output and removes its temp file after a destination race', async () => {
+  let target = '';
+  const body = Buffer.from('download bytes');
+  const server = http.createServer(async (req, res) => {
+    if (req.url === '/asset-race/status') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ state: 'available', byte_size: body.length, original_filename: 'remote.md' }));
+      return;
+    }
+    if (req.url === '/asset-race/content') {
+      await fs.writeFile(target, 'raced-in file');
+      res.end(body);
+      return;
+    }
+    res.statusCode = 404; res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'priors-asset-race-'));
+  target = path.join(dir, 'download.md');
+  const env = { ...process.env, PRIORS_ASSET_ENDPOINT: 'http://127.0.0.1:' + server.address().port, PRIORS_ASSET_TOKEN: 'fetch-token', PRIORS_ASSET_TRANSFER_STATE: path.join(dir, 'state.json') };
+  try {
+    await assert.rejects(run(process.execPath, ['scripts/asset-transfer.js', 'fetch', 'asset-race', target], { cwd: path.resolve(__dirname, '..'), env }), /asset_destination_exists/);
+    assert.equal(await fs.readFile(target, 'utf8'), 'raced-in file');
+    assert.deepEqual((await fs.readdir(dir)).filter((name) => name.includes('.tmp-')), []);
+  } finally { await new Promise((resolve) => server.close(resolve)); await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 test('asset transfer does not mark a failed scan as available', async () => {
   const server = http.createServer(async (req, res) => {
     if (req.url === '/begin' && req.method === 'POST') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ upload_id: 'upload-failed-1' })); return; }

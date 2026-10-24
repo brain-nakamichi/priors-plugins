@@ -14,6 +14,12 @@ Priors を使うと、同じ調査・説明の繰り返し、過去の決定と�
 - **例外**: 通常の事実・雑談・一時的な話題・秘密・保存不許可情報は保存しない。過去情報が判断に関係しないターンでは取得しない。使う機能・範囲・順序はAIが選び、A→B→Cの話題移行検出や一括再構成は行わない。
 - **惑わせない**: 古い記憶は消さず、現在の状態と履歴を区別して改訂・撤回・後続への参照で整理する（削除は所有権と削除条件を満たすときだけ）。推測と確定・出所を区別する。取得の結果は判断材料で、実物の確認を置き換えない。
 
+### 小さな記憶作業の委任
+
+通常のget/saveや重要情報への気付きは自分で扱います。単純な1回のreadまたは1回のsaveだけの依頼は委任しません。全件ページング、重複確認、サブテーマ整理など複数段階のbounded workだけ、登録済みのClaude subagent priors:priors-memory（定義は[こちら](../../agents/priors-memory.md)）に一件委任します。親が明示theme、resolved session_id、task facts、許可したcandidate IDs、関連する親ターンの事実、必要なreceipt、任意のcall_budgetを渡します。親の会話全文は自動で引き継がれないため、作業中は同じ候補を書きません。
+
+Codexのplugin subagent自動検出は前提にしません。実行環境がnamed agentまたはcollaborationを提供するときだけ、[`agents/priors-memory.toml`](../../../codex-plugins/priors/agents/priors-memory.toml) の `developer_instructions` とbounded taskを新しい文脈で一workerに渡します（fork可能なら空の履歴から開始）。どちらも使えなければ定義を参照して自分で作業し、agentが実行されたとは報告しません。設定変更やインストールはしません。
+
 ### 自発的に考えるための手掛かり（Claude / Codex 共通）
 
 必要な機能と順序は目的に合わせてAIが組み合わせる。heuristic cueだけで事実を確定したり、Priorsへ自動保存したりしない。
@@ -74,6 +80,8 @@ Priorsを使う場合、読取・書込に必要な session / theme の確認方
 - 元の問いや条件が今後も役立つと分かった時点で理由とともに `remember` へ（確定・完了を待たない。最初から重要なら直接長期へ）。作業中はメモも維持。
 - 長期記憶と参照を残した完了メモは`delete`。作業メモ成功は長期保存の証明ではない。失敗しても作業を続ける。
 - 転送は`scripts/asset-transfer.js publish|fetch|resume`。失敗は未完了。
+- `fetch <asset_id> <destination>` は明示した保存先を使い、既存ファイルやシンボリックリンクを置き換えない。リモートのファイル名を保存先に使わない。
+- `resume <operation_id> <theme_id>` は成功済みreceiptも元ファイルを読み直して照合するため、再開・確認まで元ファイルを保持する。
 
 テーマ一覧が選択判断に役立つ場合は `theme_list` で最新一覧を取る（一覧に無いだけで不存在としない）。
 

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { recordDecision, currentTurnAudit, activeTurnId, recordStopInvocation } = require('../hooks/decision-audit.js');
 const {
   recordProactiveCandidate,
@@ -45,6 +46,42 @@ function cryptoId() {
 
 function candidate(env, turnId, category, promptHash = require('node:crypto').randomBytes(32).toString('hex')) {
   return recordProactiveCandidate({ promptHash, signals: [category], confidence: 'high', turnId }, env).event;
+}
+
+function runPostToolSave(input, env) {
+  return spawnSync(process.execPath, [require('node:path').join(__dirname, '../hooks/post-tool-save.js')], {
+    input: JSON.stringify(input), encoding: 'utf8', env,
+  });
+}
+
+function skipIfSpawnBlocked(t, child) {
+  if (child.error?.code === 'EPERM') {
+    t.skip('sandbox policy blocks the child process required to exercise the hook entrypoint');
+    return true;
+  }
+  return false;
+}
+
+function agentSaveEvent(candidateId, response, overrides = {}) {
+  return {
+    session_id: SESSION,
+    hook_event_name: 'PostToolUse',
+    agent_id: 'synthetic-agent-17',
+    agent_type: 'subagent',
+    tool_name: 'mcp__priors__remember',
+    tool_input: { candidate_id: candidateId, body: 'synthetic-only; never persisted' },
+    tool_response: response,
+    ...overrides,
+  };
+}
+
+function successfulSaveResponse(candidateId, savedId = 'GEN-163@1') {
+  const [id, version] = savedId.split('@');
+  return {
+    operation: 'remember', outcome_code: 'recorded',
+    resource_ids: [{ role: 'primary', id, version: Number(version) }],
+    candidate_receipts: [{ candidate_id: candidateId, resource_ids: [savedId] }],
+  };
 }
 
 test('D8: no candidate means no Stop prompt', () => {
@@ -144,6 +181,56 @@ test('D8: actual PostToolUse generic save leaves candidates; explicit resource r
   acknowledgeProactiveCandidateIds(validated.map((item) => item.candidate_id), 'write-candidate', env);
   assert.deepEqual(pendingProactiveCandidates(env).map((item) => item.candidate_id), [old.candidate_id, unrelated.candidate_id]);
   assert.notEqual(reminderPayload({ pendingCandidateCount: 1 }), null, 'legacy/older unresolved candidate remains visible');
+});
+
+test('actual PostToolUse agent event acknowledges only its same-session active-turn receipt', (t) => {
+  const { env } = fixture(t);
+  const currentTurn = turn(env, SESSION);
+  const pending = candidate(env, currentTurn, 'remember-candidate');
+  const event = agentSaveEvent(pending.candidate_id, successfulSaveResponse(pending.candidate_id));
+  const child = runPostToolSave(event, env);
+  if (skipIfSpawnBlocked(t, child)) return;
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(pendingProactiveCandidates(env), [],
+    'the matching success receipt should resolve the candidate despite agent_id/agent_type fields');
+  const audit = currentTurnAudit(SESSION, 'claude', env);
+  assert.equal(audit.turn_id, currentTurn);
+  assert.deepEqual(audit.saves[0].save.candidate_receipts, [
+    { candidate_id: pending.candidate_id, resource_ids: ['GEN-163@1'] },
+  ]);
+  const journal = fs.readFileSync(env.PRIORS_DECISION_AUDIT_FILE, 'utf8');
+  assert.doesNotMatch(journal, /synthetic-only|synthetic-agent-17|subagent/,
+    'the local receipt contains references, not tool input or agent metadata');
+});
+
+test('actual PostToolUse agent events never acknowledge failed, mismatched, replayed, or unbound receipts', (t) => {
+  const cases = [
+    ['failed', (id) => ({ isError: true, error: 'synthetic failure' })],
+    ['mismatched candidate receipt', (id) => ({ ...successfulSaveResponse(id),
+      candidate_receipts: [{ candidate_id: 'pc-aaaaaaaaaaaa-00000000-remember-candidate', resource_ids: ['GEN-163@1'] }] })],
+    ['mismatched saved reference', (id) => ({ ...successfulSaveResponse(id),
+      candidate_receipts: [{ candidate_id: id, resource_ids: ['GEN-163@2'] }] })],
+    ['replayed response', (id) => ({ ...successfulSaveResponse(id), replayed: true })],
+  ];
+  for (const [label, responseFor] of cases) {
+    const { env } = fixture(t);
+    const turnId = turn(env, SESSION);
+    const pending = candidate(env, turnId, 'remember-candidate');
+    const child = runPostToolSave(agentSaveEvent(pending.candidate_id, responseFor(pending.candidate_id)), env);
+    if (skipIfSpawnBlocked(t, child)) return;
+    assert.equal(child.status, 0, `${label}: ${child.stderr}`);
+    assert.deepEqual(pendingProactiveCandidates(env).map((item) => item.candidate_id), [pending.candidate_id], label);
+  }
+
+  const { env } = fixture(t);
+  const turnId = turn(env, SESSION);
+  const pending = candidate(env, turnId, 'remember-candidate');
+  fs.writeFileSync(env.PRIORS_TURN_STATE_FILE, JSON.stringify({ schema: 'priors.active-turn-state.v1', sessions: [] }));
+  const child = runPostToolSave(agentSaveEvent(pending.candidate_id, successfulSaveResponse(pending.candidate_id)), env);
+  if (skipIfSpawnBlocked(t, child)) return;
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(pendingProactiveCandidates(env).map((item) => item.candidate_id), [pending.candidate_id],
+    'a candidate receipt cannot use a stale candidate turn when no active parent turn exists');
 });
 
 test('D8: a validated receipt resolves its candidate at PostToolUse, so a new turn before Stop does not lose it', (t) => {

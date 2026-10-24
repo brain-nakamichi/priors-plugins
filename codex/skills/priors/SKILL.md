@@ -18,6 +18,10 @@ Priors keeps you from repeating the same investigation or explanation, from maki
 
 Use the Priors MCP server when prior project decisions, design notes, or handoffs would help.
 
+## Delegate bounded memory work
+
+Handle a simple get/save or notice of important information yourself; do not delegate a task that needs only one read or one save. Delegate only a multi-step memory task, such as full subtheme pagination, duplicate checks, or index maintenance, to one available priors-memory agent or collaboration worker. Before delegating, read [`agents/priors-memory.toml`](../../agents/priors-memory.toml), pass its `developer_instructions` verbatim with a bounded task and the explicit theme, resolved session_id, task facts, caller-authorized candidate IDs, only relevant parent-turn facts/receipts, and an optional call_budget into a fresh-context worker (fork with no history when supported). The worker does not inherit the full parent conversation; keep one writer per candidate. If no agent or collaboration tool is available, follow the bundled contract directly and do not claim delegation. Codex plugin subagent auto-discovery is not assumed. Do not install anything or edit agent configuration.
+
 ## Grow subthemes on your own judgment
 
 Whenever it helps, do the following without prior user approval and report what you did (ownership and safety requirements do not change; stop if the user stops it):
