@@ -668,18 +668,20 @@ async function resolveDocument(meta, repoArg, repoId, deps = {}) {
         const finalStatus = runGit(repo, 'status', '--porcelain', '--untracked-files=all', '--', source.path);
         if (localCommit !== historyProof.head || finalStatus) {
           return { state: 'different', reason: 'head_changed', ...localInfo, local_sha256: localSha,
-            matches_priors_bytes: samePriorsBytes, verified_comparison_profile: historyProof.profile };
+            matches_priors_bytes: samePriorsBytes, verified_comparison_profile: null };
         }
       } catch {
         return { state: 'different', reason: 'head_changed', ...localInfo, local_sha256: localSha,
-          matches_priors_bytes: samePriorsBytes, verified_comparison_profile: historyProof.profile };
+          matches_priors_bytes: samePriorsBytes, verified_comparison_profile: null };
       }
     }
     return { state, ...(reason ? { reason } : {}), ...localInfo, local_sha256: localSha,
       ...(localCommit ? { local_commit: localCommit } : {}),
-      matches_priors_bytes: samePriorsBytes, verified_comparison_profile: profile };
+      matches_priors_bytes: samePriorsBytes,
+      verified_comparison_profile: state === 'source_match' || historyProof ? (historyProof?.profile || profile) : null };
   };
 
+  // Report the method that established this result: exact bytes use raw-v1 even when the tuple also permits newline normalization.
   if (localSha === source.sha256) {
     return complete('source_match', null, 'raw-v1');
   }
@@ -690,6 +692,7 @@ async function resolveDocument(meta, repoArg, repoId, deps = {}) {
     if (pinnedBytes.length > MAX_BYTES || sha256(pinnedBytes) !== source.sha256) return complete('different', 'source_commit_hash_mismatch');
   } catch { return complete('different', 'source_commit_unavailable'); }
 
+  // Newline normalization is only considered after the pinned Git blob has passed its raw SHA-256 check.
   if (source.comparison_profile === 'utf8-crlf-lf-v1') {
     try {
       if (normalizeLf(localBytes).equals(normalizeLf(pinnedBytes))) {

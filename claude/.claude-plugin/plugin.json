@@ -1,6 +1,6 @@
 {
   "name": "priors",
-  "version": "0.1.57",
+  "version": "0.1.58",
   "description": "重要情報を保持し、関連する過去情報を適時Recallする記憶システム",
   "author": {
     "name": "brain"

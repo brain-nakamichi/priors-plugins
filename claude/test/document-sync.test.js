@@ -25,7 +25,7 @@ test('Claude and Codex plugin package versions and audit scripts stay aligned', 
     require(path.join(root, 'codex-plugins/marketplace.json')).metadata.version,
     require(path.join(root, 'codex-plugins/marketplace.json')).version,
   ];
-  assert.deepEqual(versions, Array(9).fill('0.1.57'));
+  assert.deepEqual(versions, Array(9).fill('0.1.58'));
   assert.equal(fs.readFileSync(path.join(root, 'plugin/scripts/document-sync.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'codex-plugins/priors/scripts/document-sync.js'), 'utf8'));
 });
@@ -131,6 +131,7 @@ test('resolve classifies older/newer only for clean HEAD bytes with proven ances
   const newer = await resolveFixture(t, { sourceBytes: Buffer.from('old source\n'), localBytes: Buffer.from('new HEAD\n'), ancestry: 'newer' });
   const fresh = await resolveDocument(newer.meta, newer.repo, 'priors', newer.deps);
   assert.equal(fresh.state, 'newer'); assert.equal(fresh.reason, 'head_descends_from_source');
+  assert.equal(fresh.verified_comparison_profile, 'raw-v1');
   const dirty = await resolveFixture(t, { sourceBytes: Buffer.from('source\n'), localBytes: Buffer.from('edited\n'), dirty: true });
   assert.equal((await resolveDocument(dirty.meta, dirty.repo, 'priors', dirty.deps)).reason, 'dirty_worktree');
   const diverged = await resolveFixture(t, { sourceBytes: Buffer.from('source\n'), localBytes: Buffer.from('edited\n'), ancestry: 'diverged' });
@@ -147,11 +148,26 @@ test('resolve supports declared CRLF normalization only against raw-hash-verifie
   const out = await resolveDocument(f.meta, f.repo, 'priors', f.deps);
   assert.equal(out.state, 'source_match');
   assert.equal(out.verified_comparison_profile, 'utf8-crlf-lf-v1');
+  assert.notEqual(out.local_sha256, out.source_sha256, 'newline-normalized matches can have different raw hashes');
   assert.equal(out.matches_priors_bytes, false);
+  const rawEqual = await resolveFixture(t, { sourceBytes, localBytes: sourceBytes,
+    sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' } });
+  const rawMatch = await resolveDocument(rawEqual.meta, rawEqual.repo, 'priors', rawEqual.deps);
+  assert.equal(rawMatch.state, 'source_match');
+  assert.equal(rawMatch.verified_comparison_profile, 'raw-v1', 'an exact byte match is reported as raw comparison');
+  const normalizedMismatch = await resolveFixture(t, { sourceBytes, localBytes: Buffer.from('one\r\ntwo!\r\n'), dirty: true,
+    sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' } });
+  const mismatch = await resolveDocument(normalizedMismatch.meta, normalizedMismatch.repo, 'priors', normalizedMismatch.deps);
+  assert.equal(mismatch.state, 'different');
+  assert.equal(mismatch.reason, 'dirty_worktree');
+  assert.equal(mismatch.verified_comparison_profile, null, 'a rejected dirty worktree has no verified comparison profile');
+  assert.notEqual(mismatch.state, 'source_match', 'a failed normalized comparison must never report a match');
   const wrongRawPin = await resolveFixture(t, { sourceBytes, localBytes: Buffer.from('one\r\ntwo\r\n'),
     sourceOverrides: { sha256: 'f'.repeat(64), comparison_profile: 'utf8-crlf-lf-v1' } });
   const rejected = await resolveDocument(wrongRawPin.meta, wrongRawPin.repo, 'priors', wrongRawPin.deps);
   assert.equal(rejected.state, 'different'); assert.equal(rejected.reason, 'source_commit_hash_mismatch');
+  assert.equal(rejected.verified_comparison_profile, null, 'a raw pinned-blob SHA failure does not verify either comparison profile');
+  assert.equal(rejected.matches_priors_bytes, false);
 });
 
 test('resolve allows history labels for declared clean CRLF worktrees and rechecks HEAD before returning them', async (t) => {
@@ -162,11 +178,23 @@ test('resolve allows history labels for declared clean CRLF worktrees and rechec
   assert.equal(newer.state, 'newer');
   assert.equal(newer.verified_comparison_profile, 'utf8-crlf-lf-v1');
   assert.equal(newer.local_commit, crlfHead.headCommit);
+  const crlfOlder = await resolveFixture(t, { sourceBytes: Buffer.from('new source\n'), localBytes: Buffer.from('old HEAD\r\n'),
+    headBytes: Buffer.from('old HEAD\n'), sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' }, ancestry: 'older' });
+  const older = await resolveDocument(crlfOlder.meta, crlfOlder.repo, 'priors', crlfOlder.deps);
+  assert.equal(older.state, 'older');
+  assert.equal(older.verified_comparison_profile, 'utf8-crlf-lf-v1');
+  const crlfDifferent = await resolveFixture(t, { sourceBytes: Buffer.from('source\n'), localBytes: Buffer.from('changed\r\n'),
+    sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' }, ancestry: 'diverged' });
+  const different = await resolveDocument(crlfDifferent.meta, crlfDifferent.repo, 'priors', crlfDifferent.deps);
+  assert.equal(different.state, 'different');
+  assert.equal(different.reason, 'diverged_history');
+  assert.equal(different.verified_comparison_profile, 'raw-v1');
   const raced = await resolveFixture(t, { sourceBytes, localBytes, headBytes: localBytes,
     sourceOverrides: { comparison_profile: 'utf8-crlf-lf-v1' }, ancestry: 'newer', changeHeadAfterAncestry: true });
   const changed = await resolveDocument(raced.meta, raced.repo, 'priors', raced.deps);
   assert.equal(changed.state, 'different'); assert.equal(changed.reason, 'head_changed');
   assert.equal(changed.local_commit, undefined);
+  assert.equal(changed.verified_comparison_profile, null, 'a changed HEAD invalidates the earlier profile proof');
   const rootRace = await resolveFixture(t, { sourceBytes, localBytes, ancestry: 'newer', changeRootAfterAncestry: true });
   const replaced = await resolveDocument(rootRace.meta, rootRace.repo, 'priors', rootRace.deps);
   assert.equal(replaced.state, 'no_source'); assert.equal(replaced.reason, 'repository_changed');

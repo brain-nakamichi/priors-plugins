@@ -8,13 +8,13 @@ UserPromptSubmit は毎ターン開始時に、保持基準に合う重要情報
 
 確認先は `PRIORS_PLUGIN_UPDATE_URL`、通知状態の保存先は `PRIORS_PLUGIN_UPDATE_STATE_FILE` で上書きできます。確認先は HTTPS かつ許可ホストのみ利用します。
 
-手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.57）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
+手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.58）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
 
 ```sh
 node scripts/document-sync.js resolve --theme GEN --id <document-uuid> --repo <repository-root> --repo-id <audit-label> [--version N] [--metadata <search-or-read-json>]
 ```
 
-IDかdocument keyをひとつ指定します。`source_match`、`older`、`newer`、`different`、`missing`、`no_source`のいずれかと、Priors本文SHA・version・audit noteを返します。未証明の履歴は`different`となり、別のファイルは探索しません。`matches_priors_bytes`がtrueでなければローカルファイルとPriors本文は同一と扱いません。
+IDかdocument keyをひとつ指定します。`source_match`、`older`、`newer`、`different`、`missing`、`no_source`のいずれかと、Priors本文SHA・version・audit noteを返します。`comparison_profile`はtupleの宣言値、`verified_comparison_profile`は一致を実際に確認した方式で、比較を確認できない`different`ではnullです。未証明の履歴は`different`となり、別のファイルは探索しません。`matches_priors_bytes`がtrueでなければローカルファイルとPriors本文は同一と扱いません。
 直近のsearch/read JSONを`--metadata`で渡す場合は、その応答の文書IDまたはkeyに一致する行だけを使い、追加のMCP呼出しをしません。結果の`metadata_origin`は`captured_metadata`となり、保存済み応答の利用は現在のPriors再確認・権限再認証を意味しません。省略時は通常のread由来として`live_read`を返します。
 
 ### Asset 転送の再開

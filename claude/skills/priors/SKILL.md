@@ -76,9 +76,9 @@ Priorsを使う場合、読取・書込に必要な session / theme の確認方
 
 ### ローカル文書の所在を確認する場合（任意）
 
-ローカルファイルの場所やPriors本文との差が今回役立つ場合だけ、`node scripts/document-sync.js resolve --theme T (--id UUID | --key K) --repo <repository-root> --repo-id <audit-repository-label> [--version N] [--metadata <search-or-read-json>]`を使えます。通常は小さい`document` readを使います。直前のsearch/read応答を保存済みなら、1 MiB以下のJSON metadataファイルを`--metadata`で指定して追加MCP呼出しを省けます。結果は`metadata_origin: captured_metadata`と明示し、保存済み応答から現在のPriors状態や権限を再確認したとは扱いません。完全な`local_source` tupleを、指定repo label・明示rootと照合します。対象はtupleに記録されたMarkdownパスだけです。本文を取得・表示・送信せず、書込・同期・fallback選択もしません。
+ローカルファイルの場所やPriors本文との差が今回役立つ場合だけ、`node scripts/document-sync.js resolve --theme T (--id UUID | --key K) --repo <repository-root> --repo-id <audit-repository-label> [--version N] [--metadata <search-or-read-json>]`を使えます。`--repo`と`--repo-id`は常に明示します。通常は小さい`document` readを使います。`PRIORS_DOCUMENT_TOKEN`が無い場合でも、保存済みのbounded search/read応答があれば、1 MiB以下のJSON metadataファイルを`--metadata`で指定して追加MCP呼出しやtokenを使わず解決できます。結果は`metadata_origin: captured_metadata`と明示し、保存済み応答から現在のPriors状態・鮮度・権限を再確認したとは扱いません。metadataが無効・不完全なら推測せず結果を報告します。完全な`local_source` tupleを、指定repo label・明示rootと照合します。対象はtupleに記録されたMarkdownパスだけです。本文を取得・表示・送信せず、書込・同期・fallback選択もしません。
 
-`source_match`は記録されたrepo sourceとローカルbytesがrawまたは明示された改行profileで一致した意味です。別に返るPriors `sha256`は文書本文hashであり、`matches_priors_bytes`がtrueのときだけローカルraw bytesと同じです。source metadataが無い・古い版・履歴を証明できない・dirty/diverged worktreeなら場所の同一性を推測せず、`no_source`または`different`を返します。直接ファイルが既知ならそのファイルを読めます。所在が不明なら`document search`や必要に応じた履歴検索も候補です。このresolveを含む機能の順序は固定しません。
+`source_match`は記録されたrepo sourceとローカルbytesがrawまたは明示された改行profileで一致した意味です。`comparison_profile`はtupleで宣言された方式、`verified_comparison_profile`は一致を実際に確認できた方式で、比較を確認できない`different`ではnullです。別に返るPriors `sha256`は文書本文hashであり、`matches_priors_bytes`がtrueのときだけローカルraw bytesと同じです。source metadataが無い・古い版・履歴を証明できない・dirty/diverged worktreeなら場所の同一性を推測せず、`no_source`または`different`を返します。直接ファイルが既知ならそのファイルを読めます。所在が不明なら`document search`や必要に応じた履歴検索も候補です。このresolveを含む機能の順序は固定しません。
 
 ### エージェントの作業メモ（working cache）
 - 新しいセッション、テーマ切替、圧縮後は `working_cache_read` を読み、`task_key` か `work_id` が一致するメモだけを `get` する。更新日時だけで選ばない。
