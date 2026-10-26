@@ -1,6 +1,6 @@
 # Priors Codex プラグイン
 
-## 候補版 0.1.61
+## 候補版 0.1.62
 
 根拠が足りない、昔の経緯や撤回前の判断を確かめたい、正確な数値が必要など、追加の過去情報が役立つとAIが判断した場合は、現在の`recall` / `consult`契約が対応していれば`include_summaries: true`を選べます。数秒余分にかかることがあるため毎回は使わず、通常検索と深い検索の固定順序も設けません。通常検索ではfieldを省略するか`false`にします。`summary_expand`は独立した明示操作です。
 
@@ -12,7 +12,7 @@ UserPromptSubmit は毎ターン開始時に、保持基準に合う重要情報
 
 確認先は `PRIORS_PLUGIN_UPDATE_URL`、通知状態の保存先は `PRIORS_PLUGIN_UPDATE_STATE_FILE` で上書きできます。確認先は HTTPS かつ許可ホストのみ利用します。
 
-手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.61）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
+手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.62）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
 
 ```sh
 node scripts/document-sync.js resolve --theme GEN --id <document-uuid> --repo <repository-root> --repo-id <audit-label> [--version N] [--metadata <search-or-read-json>]

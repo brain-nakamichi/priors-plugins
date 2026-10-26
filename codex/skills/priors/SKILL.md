@@ -49,6 +49,7 @@ Keep ordinary recall/consult results first and read `summary_sources` as a bound
 When a historical claim needs more context, follow its `source_recovery` action using the returned exact `known_revision`, inspect the source's explicit typed `amends` relation, then follow only its fixed target version. Never substitute the current head or recursively expand summaries automatically.
 
 When evidence is insufficient, older history or a pre-retraction decision matters, or exact numbers are needed, the AI may choose `include_summaries: true` if the current `recall` or `consult` schema supports it. This can add several seconds, so do not use it every time; there is no fixed order between ordinary and deep search. Omit the field or pass `false` for ordinary recall. Do not infer field support from the plugin version or from `memory_summary_provenance` alone. Explicit `summary_expand` calls remain a separate operation and use the exact returned ID/version.
+明示 deep の実行状況は `coverage.summary_sources.status`（searched_none / available / partial / unavailable / failed / omitted_budget）で確認する。未指定の通常検索にはこの欄は付かない。
 
 ## Authorization and error handling
 

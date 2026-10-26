@@ -114,6 +114,7 @@ recall / consult の通常結果を先に確認する。要約sourceの展開結
 historical claimの背景をさらに調べる必要がある場合は、返された`source_recovery`から元sourceを同じ`known_revision`で読み、明示的なtyped `amends` relationとその固定target versionを確認してから必要な範囲だけを追う。現在headへの置換や要約の自動再帰展開はしない。
 
 根拠が足りない、昔の経緯や撤回前の判断を確かめたい、正確な数値が必要など、追加の過去情報が役立つとAIが判断した場合は、現行の`recall` / `consult`ツール定義が対応していることを確かめて`include_summaries: true`を選べる。数秒余分にかかることがあるため毎回は使わず、通常検索と深い検索の固定順序も設けない。通常検索ではfieldを省略するか`false`にする。プラグイン版や`memory_summary_provenance`だけからfield対応を推測しない。明示的な`summary_expand`は別の操作として利用できる。
+明示 deep の実行状況は `coverage.summary_sources.status`（searched_none / available / partial / unavailable / failed / omitted_budget）で確認する。未指定の通常検索にはこの欄は付かない。
 - `capture`／`maintain`は結果不明なら同じsession・theme・idempotency keyで再送する（新しい鍵は重複を作る）。
 
 ## 4. 保存する価値があると判断した場合
