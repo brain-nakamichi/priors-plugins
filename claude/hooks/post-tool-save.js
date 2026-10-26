@@ -30,7 +30,7 @@ function parseSaveResponse(input) {
     const ids = subthemeSavedRefs(name, response);
     return ids ? { name, response, ids } : null;
   }
-  if (!response || !(response.operation === name || name === 'amend' && /^amend\.(revise|supersede|dispute)$/.test(response.operation)) || !(response.outcome_code === 'recorded' || ['capture','amend'].includes(name) && response.outcome_code === 'applied') || !Array.isArray(response.resource_ids) || !response.resource_ids.length || response.resource_ids.length > 20) return null;
+  if (!response || !(response.operation === name || name === 'amend' && /^amend\.(revise|supersede|dispute)$/.test(response.operation)) || !(response.outcome_code === 'recorded' || ['capture','amend','summary_record'].includes(name) && response.outcome_code === 'applied') || !Array.isArray(response.resource_ids) || !response.resource_ids.length || response.resource_ids.length > 20) return null;
   const ids = [];
   for (const ref of response.resource_ids) {
     if (!ref || typeof ref.id !== 'string' || !/^[A-Z][A-Z0-9]{1,7}-(?:c|w)?[0-9]+$/.test(ref.id)) return null;

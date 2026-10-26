@@ -103,6 +103,17 @@ AIが利用者の依頼に対してテーマ全体の整理が有用だと判断
 - 自分の記憶の編集・撤回・分割・結合は`maintain`で、直前の版をexpected versionに渡す（直接適用か拒否）。別主体の記憶への意見は dispute か amends・refutes・supports のリンク付き新規記憶で追記する。
 - 関係は 2 経路: 記憶を書くときの辺は`links`、独立に登録・撤回する関係は`relation`（登録済み≠正しい、撤回は自分の分だけ）。全体は`get`の`relations`で読む。他主体の関係への反論は`refs.relation_id`付きの記憶で。`relation`の`invalid_input`は`field`/`reason`で項目を示す（引用の位置は code point）。
 - `annotations`（他主体の意見）と、`context_open`/`recall` の各行に付く `related_updates`（流入する amends / refutes。`behind` は旧版への意見、`retracted` は撤回済み）は判断材料。断定タイトルだけで読まず訂正と併せて読む。対応・同意・結論の統一は必須でない。
+
+### 派生要約
+
+要約は通常記憶から作る検索入口であり、正しさ・合意・現行仕様の保証ではない。固定の全件要約やスケジュール実行をせず、話題がまとまった時や検索の入口不足が確認された時だけ、3〜12件程度の限定されたsource版を読む。件数を超えるなら主題を分けるか、追加読取の必要を示す。
+
+`summary_record` は要約本文とclaimごとの根拠を一度に登録する。既存の通常記憶を先に `remember` して後から出典を足さない。各claimに原文ID・版・本文ハッシュ値・役割・任意の正確なUnicode code point範囲を渡す。範囲はUnicodeの正規化をせず、原文と完全一致させる。役割はbasis / condition / exception / counterevidence / measurement_source / historical_context / unresolved。結論、条件、例外、反証、却下案、未解決点、数値の日時・単位・対象、measured/reported/inferredを保ち、異なる日の数値を現在値へ統合しない。未確認事項を断定しない。
+
+recall / consult の通常結果を先に確認する。要約sourceの展開結果は別の補足欄とcoverageで読む。summary ID・版は検索結果で受け取った固定値を使う。出典展開はアクセス可能なsourceの証拠を返すもので、要約の検証・認可・承認ではない。利用不可・古い場合は返されたcoverage/recoveryだけを確認し、隠れたsourceの存在や件数を推測してはならない。重要な現行判断では通常のget等で原文の現在状態を確認する。
+historical claimの背景をさらに調べる必要がある場合は、返された`source_recovery`から元sourceを同じ`known_revision`で読み、明示的なtyped `amends` relationとその固定target versionを確認してから必要な範囲だけを追う。現在headへの置換や要約の自動再帰展開はしない。
+
+根拠が足りない、昔の経緯や撤回前の判断を確かめたい、正確な数値が必要など、追加の過去情報が役立つとAIが判断した場合は、現行の`recall` / `consult`ツール定義が対応していることを確かめて`include_summaries: true`を選べる。数秒余分にかかることがあるため毎回は使わず、通常検索と深い検索の固定順序も設けない。通常検索ではfieldを省略するか`false`にする。プラグイン版や`memory_summary_provenance`だけからfield対応を推測しない。明示的な`summary_expand`は別の操作として利用できる。
 - `capture`／`maintain`は結果不明なら同じsession・theme・idempotency keyで再送する（新しい鍵は重複を作る）。
 
 ## 4. 保存する価値があると判断した場合

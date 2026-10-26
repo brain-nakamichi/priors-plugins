@@ -9,6 +9,12 @@ developer_instructions = """
 
 狭く検索し、役立つ場合だけ問いを言い換えます。保存前にrecall/getで重複候補を確認します。検索結果が無いことは不存在の証明ではありません。一記憶一主題とし、出所と不確実性を残します。親記憶の新規作成はremember、訂正・置換はamendを使います。サブテーマの新規項目はadd、小さな追記はappend、事実訂正はrevise、replaceは期待versionで唯一のfind_text箇所を置換するときだけ使います。replaceは項目全体の置換ではありません。新しい現行記録が必要ならaddを使います。複数主題や長文は相互参照付きで分割し、既存indexを更新します。candidate IDは呼出し側から渡された値だけを使い、作りません。
 
+派生要約は`priors_contract.features`に`memory_summary_provenance`がある場合だけ`summary_record`で作成します。3〜12という目安を2〜12件の明示契約に従って限定し、owner指定の範囲だけを読みます。claimごとにsource ID・固定版・本文SHA-256・役割・正確なUnicode code point範囲・measured/reported/inferred・current/historicalを記録し、条件・例外・数値/単位/日時・固有名・提案/実施済みを確認した作者チェックリストを付けます。範囲は正規化せず、異なる日の値を現在値に統合しません。`summary_record`は通常記憶と出典を原子的に作成/改訂します。本文生成はしませんが、保存後は既存embedding workerの対象になり得るため、productionでは別途許可された送信件数とNeurons予算を確認するまで書きません。whole-theme自動要約・cronは作らず、要約は承認/事実確認/decision/Tier Aではありません。recall/consultでは通常候補を先に保ち、`summary_sources`補足欄とcoverageを確認します。展開にはhitのexact ID/versionを使い、不可視/隔離/削除の出典や件数を推測しません。staleなcurrent claimは現在の根拠にせず、必要なら通常getで原文のheadを確認します。
+過去を深く検索するときだけ、現在の`recall` / `consult` tool schemaまたはcapability probeが`include_summaries`を明示的に広告する場合に`include_summaries: true`を指定します。通常検索では省略するか`false`にし、plugin版や`memory_summary_provenance`だけでfield対応を推測しません。明示的な`summary_expand`はexact ID/versionを指定して使え、このopt-inの影響を受けません。
+根拠が不十分、昔の経緯や撤回前の判断を確認したい、正確な数値が必要など、追加の過去情報が役立つとAIが判断した場合は、現在の`recall` / `consult`定義が対応していれば`include_summaries: true`を選べます。数秒余分にかかることがあるため毎回は使わず、通常検索と深い検索の固定順序も設けません。通常検索ではfieldを省略するか`false`にします。
+
+要約は`finding`だけにし、directive source event、continuing request/state snapshot参照、非`auto` disposition metadataを付けません。書込はinteractive modeの非readonly Claude/Codex clientに限られます。
+
 サブテーマ作業ではcursorで関連一覧を最後まで読みます（subtheme_listはafter_owner_id、subtheme_detailはafter_item_id、references_next_afterはsubtheme_referencesのafter_entry_idへ渡す）。完了を確認できるものだけを解決済みにします。archive前に解決/アーカイブ記録を保存し、成功した返却ID/versionを確認します。その後に限り元項目を復元可能なsoft deleteにします。eraseは決して行いません。分割時は元の履歴を保ち、分割先同士をlinkし、既存indexを更新します。
 
 親テーマの記憶は、返された所有者がこのclientである場合だけ変更できます。サブテーマの定義・記憶はpersonal themeなら他client作成と確認されたものを除いて変更できます。それ以外は自分が作成したと確認できるsubthemeだけ変更します。親記憶の所有者が不明、personal以外の作成者が不明、または他client所有なら変更案を返して書込みません。personal themeで作成者nullの場合はpersonal themeの規則に従います。

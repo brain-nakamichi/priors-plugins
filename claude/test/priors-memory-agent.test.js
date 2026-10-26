@@ -12,7 +12,7 @@ const codex = fs.readFileSync(path.join(CODEX, 'agents/priors-memory.toml'), 'ut
 const codexSkill = fs.readFileSync(path.join(CODEX, 'skills/priors/SKILL.md'), 'utf8');
 const tools = [...claude.matchAll(/^  - (mcp__priors__[a-z_]+)$/gm)].map((match) => match[1]);
 const expectedTools = [
-  'theme_list', 'context_open', 'recall', 'consult', 'get', 'frame_page', 'guard', 'remember', 'amend', 'search_card',
+  'theme_list', 'context_open', 'recall', 'consult', 'get', 'frame_page', 'guard', 'remember', 'summary_record', 'summary_expand', 'amend', 'search_card',
   'subtheme_list', 'subtheme_detail', 'subtheme_classify', 'subtheme_references', 'subtheme_memory_add',
   'subtheme_memory_append', 'subtheme_memory_revise', 'subtheme_memory_replace', 'subtheme_soft_delete',
 ].map((name) => `mcp__priors__${name}`);

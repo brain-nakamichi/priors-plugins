@@ -14,7 +14,7 @@ test('the plugin registers start/end prompts while preserving optional-use disco
   assert.deepEqual(Object.keys(config.hooks), ['SessionStart', 'UserPromptSubmit', 'Stop', 'PostToolUse']);
   assert.equal(config.hooks.UserPromptSubmit[0].hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.js"');
   assert.equal(config.hooks.Stop[0].hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/conversation-end.js"');
-  assert.equal(config.hooks.PostToolUse[0].matcher, '^mcp__priors__(remember|amend|capture|work_create|work_event|subtheme_memory_add|subtheme_memory_append|subtheme_memory_revise|subtheme_memory_replace)$');
+  assert.equal(config.hooks.PostToolUse[0].matcher, '^mcp__priors__(remember|summary_record|amend|capture|work_create|work_event|subtheme_memory_add|subtheme_memory_append|subtheme_memory_revise|subtheme_memory_replace)$');
   assert.equal(config.hooks.PostToolUse[0].hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-save.js"');
   assert.equal(config.hooks.UserPromptSubmit[0].hooks[0].timeout, 15);
   assert.equal(config.hooks.Stop[0].hooks[0].timeout, 15);

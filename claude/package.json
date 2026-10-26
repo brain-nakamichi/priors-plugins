@@ -1,6 +1,6 @@
 {
   "name": "priors-plugin",
-  "version": "0.1.58",
+  "version": "0.1.61",
   "private": true,
   "type": "commonjs",
   "description": "Claude Code plugin: retain important information and recall relevant history",
