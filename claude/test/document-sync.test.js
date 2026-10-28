@@ -25,7 +25,7 @@ test('Claude and Codex plugin package versions and audit scripts stay aligned', 
     require(path.join(root, 'codex-plugins/marketplace.json')).metadata.version,
     require(path.join(root, 'codex-plugins/marketplace.json')).version,
   ];
-  assert.deepEqual(versions, Array(9).fill('0.1.63'));
+  assert.deepEqual(versions, Array(9).fill('0.1.65'));
   assert.equal(fs.readFileSync(path.join(root, 'plugin/scripts/document-sync.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'codex-plugins/priors/scripts/document-sync.js'), 'utf8'));
   for (const file of ['plugin/skills/priors/SKILL.md', 'codex-plugins/priors/skills/priors/SKILL.md',

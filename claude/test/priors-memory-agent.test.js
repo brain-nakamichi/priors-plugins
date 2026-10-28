@@ -13,7 +13,7 @@ const codexSkill = fs.readFileSync(path.join(CODEX, 'skills/priors/SKILL.md'), '
 const tools = [...claude.matchAll(/^  - (mcp__priors__[a-z_]+)$/gm)].map((match) => match[1]);
 const expectedTools = [
   'theme_list', 'context_open', 'recall', 'consult', 'get', 'frame_page', 'guard', 'remember', 'summary_record', 'summary_expand', 'amend', 'search_card',
-  'subtheme_list', 'subtheme_detail', 'subtheme_classify', 'subtheme_references', 'subtheme_memory_add',
+  'subtheme_list', 'subtheme_detail', 'subtheme_classify', 'subtheme_references', 'subtheme_memory_get', 'subtheme_memory_move', 'subtheme_memory_add',
   'subtheme_memory_append', 'subtheme_memory_revise', 'subtheme_memory_replace', 'subtheme_soft_delete',
 ].map((name) => `mcp__priors__${name}`);
 
@@ -33,8 +33,10 @@ test('Claude and Codex memory worker definitions share the bounded safety contra
     assert.match(body, /pending/);
     assert.match(body, /raw logs|raw log/);
   }
-  assert.match(claude, /personal theme/);
-  assert.match(codex, /personal theme/);
+  assert.match(claude, /same tenant.*regardless of creator/);
+  assert.match(codex, /同じテナント.*作成者を問わず/);
+  assert.match(claude, /existing write authorization/);
+  assert.match(codex, /既存の書込認可/);
   assert.match(claude, /find_text/);
   assert.match(codex, /find_text/);
   assert.match(claude, /Parent-supplied new facts are reported claims/);

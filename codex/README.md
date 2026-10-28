@@ -1,6 +1,8 @@
 # Priors Codex プラグイン
 
-## 候補版 0.1.63
+## 候補版 0.1.65
+
+GEN-1023/1640に合わせ、同じテナントで既存の書込認可を通るClaude/Codexが作成者を問わずサブテーマを編集・削除・復元できる案内へ訂正。現在版の再読・競合の再取得・出所の保持は続けます。移動は方式A（現在版を新IDへ、元履歴を保持）。SQL373と対応ツールの提供後だけ使い、既定dry-runで枠を確認してから確定します。公開とインストールはClaudeの別工程です。
 
 SQL371 の quota 表示に対応。`accounting_mode=refundable` かつ `refunds_enabled=true` の owner だけ、削除で証明済みの枠が戻り、restore は再計上します。未有効化時は返却されません。公開・適用は別工程です。
 
@@ -14,7 +16,7 @@ UserPromptSubmit は毎ターン開始時に、保持基準に合う重要情報
 
 確認先は `PRIORS_PLUGIN_UPDATE_URL`、通知状態の保存先は `PRIORS_PLUGIN_UPDATE_STATE_FILE` で上書きできます。確認先は HTTPS かつ許可ホストのみ利用します。
 
-手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.63）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
+手動の文書監査は [`docs/document-audit.md`](../../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.65）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
 
 ```sh
 node scripts/document-sync.js resolve --theme GEN --id <document-uuid> --repo <repository-root> --repo-id <audit-label> [--version N] [--metadata <search-or-read-json>]
