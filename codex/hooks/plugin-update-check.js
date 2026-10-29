@@ -4,8 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CLIENT = 'codex';
-// GEN-541: 公開リポの実パスは codex/plugin.json（旧 codex/priors/plugin.json は 404 で通知が一度も出なかった）
-const DEFAULT_URL = 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/plugin.json';
+// GEN-541 (historical; 0.1.67 uses compatibility manifest): 公開リポの実パスは codex/plugin.json（旧 codex/priors/plugin.json は 404 で通知が一度も出なかった）
+const DEFAULT_URL = 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/.codex-plugin/plugin.json';
 const MAX_BODY = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 1500;
 const NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -21,7 +21,7 @@ function newer(a, b) {
   return false;
 }
 function currentVersion() {
-  try { return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'plugin.json'), 'utf8')).version; }
+  try { return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.codex-plugin', 'plugin.json'), 'utf8')).version; }
   catch { return process.env.PRIORS_PLUGIN_VERSION || '0.0.0'; }
 }
 function statePath(env) { return env.PRIORS_PLUGIN_UPDATE_STATE_FILE || path.join(os.homedir(), '.priors', 'plugin-update-check.json'); }

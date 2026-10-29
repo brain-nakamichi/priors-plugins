@@ -1,6 +1,6 @@
 {
   "name": "priors",
-  "version": "0.1.66",
+  "version": "0.1.67",
   "description": "重要情報を保持し、関連する過去情報をCodexから適時Recallするプラグイン",
   "author": {
     "name": "Priors"
