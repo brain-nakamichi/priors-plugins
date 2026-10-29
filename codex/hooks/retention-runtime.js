@@ -3,6 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cryp
 const {inspectSensitiveInput}=require('./shared/sensitive-input.js');
 const {proactiveSignals,isHarnessMessage}=require('./shared/retention-signals.js');
 const {parseSavedResponse}=require('./shared/save-response.js');
+const checkpoint=require('./shared/compact-checkpoint.js');
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BYTES=65536,MAX_SESSIONS=16,MAX_TURNS=8,MAX_SAVES=20,TTL=7*86400000;
 const CATEGORIES=['remember-candidate','continuing-request-candidate','unresolved-candidate'];
@@ -61,6 +62,7 @@ function prompt(input,env){
   if(previous)previous.next_notified=true;
   const t={turn_id:input.turn_id,at:Date.now(),categories,acknowledged:false,stop_notified:false,next_notified:false,saves:[]};
   if(categories.length)t.candidate_id=`pc-${crypto.randomBytes(6).toString('hex')}-${input.turn_id.slice(0,8)}-${categories.join('-')}`;
+  if(t.candidate_id)checkpoint.recordCandidate('codex',input.session_id,{id:t.candidate_id,categories},env);
   s.turns.push(t);s.turns=s.turns.slice(-MAX_TURNS);
   const lines=[];
   if(previous)lines.push('Priors: 前ターンの保存候補が未確認です。必要なら出所を確認して扱い、保存済みと推測しないでください。');
@@ -79,6 +81,7 @@ function save(input,env){
   // Save success is not a coverage claim: only explicit same-turn server-bound receipts resolve this candidate.
   if(t.candidate_id===id&&Array.isArray(parsed.response.candidate_receipts)&&parsed.response.candidate_receipts.some(r=>
    r?.candidate_id===id&&Array.isArray(r.resource_ids)&&r.resource_ids.length>0&&r.resource_ids.every(x=>parsed.ids.includes(x))))t.acknowledged=true;
+  checkpoint.recordSave('codex',input.session_id,parsed.ids,t.acknowledged?[id]:[],env);
   return null; // No same success message after every tool.
  });
 }

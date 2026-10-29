@@ -111,6 +111,8 @@ function main() {
   try {
     const recordedCandidate = recordTurnCandidate(promptHash, signals, confidence, turnId);
     candidateId = recordedCandidate?.event?.candidate_id;
+    if (candidateId && !input.agent_id && !input.agent_type && !isHarnessMessage(prompt) && !startsLikeHarness(prompt)) require('./compact-checkpoint.js').recordCandidate('claude', input.session_id,
+      { id: candidateId, categories: recordedCandidate.event.categories });
   } catch { /* candidate hints are best effort */ }
   const context = [
     '毎ターン、Recall条件と保持基準を確認する。無関係なターンは検索しないが、過去情報が今回を左右し最新文脈に不足する場合は依存前に取得し、保持基準に合う重要情報は明示依頼を待たず保存する。',

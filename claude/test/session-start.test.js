@@ -11,7 +11,7 @@ const HOOKS = path.join(__dirname, '..', 'hooks', 'hooks.json');
 
 test('the plugin registers start/end prompts while preserving optional-use discovery', () => {
   const config = JSON.parse(fs.readFileSync(HOOKS, 'utf8'));
-  assert.deepEqual(Object.keys(config.hooks), ['SessionStart', 'UserPromptSubmit', 'Stop', 'PostToolUse']);
+  assert.deepEqual(Object.keys(config.hooks), ['SessionStart', 'UserPromptSubmit', 'Stop', 'PostToolUse', 'PreCompact']);
   assert.equal(config.hooks.UserPromptSubmit[0].hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.js"');
   assert.equal(config.hooks.Stop[0].hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/conversation-end.js"');
   assert.equal(config.hooks.PostToolUse[0].matcher, '^mcp__priors__(remember|summary_record|amend|capture|work_create|work_event|subtheme_memory_add|subtheme_memory_append|subtheme_memory_revise|subtheme_memory_replace)$');

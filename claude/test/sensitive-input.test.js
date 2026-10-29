@@ -200,7 +200,7 @@ test('deferred cues use existing categories and shared guidance; hand alone is l
 test('Codex helper copies match and verified native hooks use bounded candidate guidance', () => {
   for (const name of ['sensitive-input.js', 'bounded-input.js']) assert.equal(fs.readFileSync(path.join(ROOT, 'hooks', name), 'utf8'), fs.readFileSync(path.join(CODEX, 'hooks', name), 'utf8'));
   const hooks = JSON.parse(fs.readFileSync(path.join(CODEX, 'hooks', 'hooks.json'), 'utf8')).hooks;
-  assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse','SessionStart','Stop','UserPromptSubmit']);
+  assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse','PreCompact','SessionStart','Stop','UserPromptSubmit']);
   assert.ok(hooks.Stop);
   assert.equal(hooks.UserPromptSubmit.length, 1);
   const auditFile = path.join(os.tmpdir(), `priors-codex-guidance-no-audit-${process.pid}.jsonl`);

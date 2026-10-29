@@ -59,3 +59,6 @@ IDかdocument keyをひとつ指定します。`source_match`、`older`、`newer
 Claudeの定義は `Priors/plugin/agents/priors-memory.md` にあり、`priors:priors-memory` として検出されます。Codex用 `agents/priors-memory.toml` は同梱していますが、pluginからの自動検出は確認していません。親は明示theme・session・task facts・許可済みcandidate IDs・関連する親ターンの事実だけを渡し、既定12回のPriors呼出し予算を使います。receiptは親が検証し、agentの報告だけで保存成功としません。
 
 pilotのsynthetic Claude receipt testはhookの検証動作を確認するもので、実クライアントが同じsubagent eventを出す証明ではありません。候補版0.1.66のCodexでは、同じsession・turnの明示candidate_idと保存応答のcandidate_receiptsが一致した場合だけPostToolUseで確認済みにします。従来の手動record-decisionの記録から、新しい候補の確認済みを推定しません。pilotの4 review観点と制約は [memory-agent pilot](../../docs/priors-memory-agent-pilot-20261024.md) を参照してください。
+# 公開候補 0.1.70：コンパクト後の簡易点検
+
+PreCompactを追加し、SessionStart(source=compact)から1回だけ点検を案内します。本文/transcriptは扱わず、自動保存・自動起動もしません。公開後はCLI `/hooks`で **SessionStart・UserPromptSubmit・PostToolUse・Stop・PreCompactの5つ** を利用者が確認・再信頼してください。信頼や設定をプラグインは変更しません。公開はClaudeが利用者の許可を得て、他の変更とまとめます。

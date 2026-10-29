@@ -75,3 +75,6 @@ Claudeの定義は `agents/priors-memory.md` にあり、`priors:priors-memory` 
 pilotのsynthetic Claude receipt testはhookの検証動作を確認するもので、実クライアントが同じsubagent eventを出す証明ではありません。候補版0.1.66のCodexは、同じsession・turnの明示candidate_idと保存応答のcandidate_receiptsが一致した場合だけPostToolUseで確認済みにします。pilotの4 review観点と制約は [memory-agent pilot](../docs/priors-memory-agent-pilot-20261024.md) を参照してください。
 
 候補版0.1.66はCodex側に候補・保存成功・応答終了のローカル支援を追加します。分類と成功応答の解析は`hooks/retention-signals.js`・`hooks/save-response.js`を正本とし、`node scripts/sync-codex-hook-core.js`でCodex用に同梱します（`--check`で一致検査）。Claude側の候補判定・保存成功判定・案内の動作は維持します。公開はClaudeが利用者の許可を得て行います。
+# 公開候補 0.1.70：コンパクト後の簡易点検
+
+PreCompactで期間内の候補メタデータと保存ID@版だけを控え、SessionStart(compact)で対象があるとき1回案内します。本文/transcriptの取得、自動保存、自動サブエージェント起動はしません。記憶担当の点検も既定12呼出し内で、期間内の保存と指定されたサブテーマ項目だけを対象にします。公開はClaudeが利用者の許可を得て他の変更とまとめて行います。

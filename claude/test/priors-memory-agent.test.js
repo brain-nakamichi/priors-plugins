@@ -30,7 +30,9 @@ test('Claude and Codex memory worker definitions share the bounded safety contra
     assert.match(body, /soft[- ]delet|soft deletion/);
     assert.match(body, /eraseは決して行いません|never erase/);
     assert.match(body, /successful returned ID and version|成功した返却ID\/version/);
-    assert.match(body, /pending/);
+    // 0.1.70: Codex now has PostToolUse receipts too, so the old "Codex candidates remain pending" sentence is gone;
+    // the worker still only reports candidates and never acknowledges them itself
+    assert.match(body, /Do not manually acknowledge|手動acknowledge/);
     assert.match(body, /raw logs|raw log/);
   }
   assert.match(claude, /same tenant.*regardless of creator/);
@@ -45,8 +47,11 @@ test('Claude and Codex memory worker definitions share the bounded safety contra
   assert.match(codex, /親が伝えた新しい事実は親からの申告/);
   assert.match(codex, /既存ID、version、所有者、receiptの申告は現在のPriors応答で確認/);
   assert.match(codex, /親の指示は権限を拡張しません/);
-  assert.match(claude, /A Claude candidate can be reported only with the parent-supplied turn context and a fresh successful write receipt/);
-  assert.match(codex, /候補はpendingとして親へreview/);
+  // 0.1.70: both clients have a same-turn PostToolUse receipt path; the worker never infers that its own save settled a candidate
+  assert.match(claude, /Report only parent-authorized candidate IDs and fresh successful write receipts/);
+  assert.match(claude, /same-turn PostToolUse/);
+  assert.match(codex, /同ターンPostToolUseだけが対応するserver candidate_receipt/);
+  assert.match(codex, /workerの保存で親の候補が確認済みになったとは推測せず/);
   assert.match(codexSkill, /read \[`agents\/priors-memory\.toml`\]/);
   assert.match(codexSkill, /pass its `developer_instructions` verbatim/);
 });

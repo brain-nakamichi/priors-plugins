@@ -26,6 +26,8 @@ function postToolSaveObservation(input, env = process.env) {
   return {
     sessionId: input.session_id,
     turnId,
+    // a subagent's save still settles candidates as before; only the compact period record leaves it out
+    fromSubagent: Boolean(input?.agent_id || input?.agent_type),
     save: { outcome: 'recorded', ids: parsed.ids, tool: parsed.name, ...(candidateReceipts.length ? { candidate_receipts: candidateReceipts } : {}) },
   };
 }
@@ -35,6 +37,7 @@ function postToolSaveObservation(input, env = process.env) {
 function recordSaveObservation(observation, env = process.env) {
   recordDecision({ decision: 'write-candidate', client: 'claude', source: 'hook', invocationKind: 'client-hook', phase: 'tool-save', sessionId: observation.sessionId, turnId: observation.turnId, save: observation.save }, env);
   const ids = (observation.save.candidate_receipts || []).map((receipt) => receipt.candidate_id);
+  if (!observation.fromSubagent) require('./compact-checkpoint.js').recordSave('claude', observation.sessionId, observation.save.ids, ids, env);
   return ids.length ? acknowledgeProactiveCandidateIds(ids, 'write-candidate', env) : 0;
 }
 function main() {

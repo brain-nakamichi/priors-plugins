@@ -24,3 +24,17 @@ const receipts=[{candidate_id:c.candidate_id,resource_ids:[item+'@17']}];assert.
 assert.deepEqual(candidateReceiptForSave(turn,'subtheme_memory_append',[{candidate_id:c.candidate_id,resource_ids:[item+'@16']}],savedRefs(p),x.env),[]);
 assert.deepEqual(candidateReceiptForSave(turn,'subtheme_list',receipts,savedRefs(p),x.env),[]);
 recordDecision({decision:'write-candidate',phase:'tool-save',source:'hook',client:'claude',sessionId:sid,turnId:turn,save:{outcome:'recorded',tool:'subtheme_memory_append',ids:[item+'@17'],candidate_receipts:receipts}},x.env);assert.equal(auditHealth(x.env).invalid_lines,0);});
+
+// 0.1.70 review (2026-10-29): leaving a subagent's save out of the compact period record must not stop it from settling
+// candidates as before; only the compact checkpoint skips it.
+test('a subagent save is still parsed and settles candidates; only the compact period record skips it',()=>{
+  const {postToolSaveObservation}=require('../hooks/post-tool-save.js');
+  const p=input();p.agent_id='agent-1';p.agent_type='priors:priors-memory';
+  assert.deepEqual(savedRefs(p),['ZZ-1@1']);
+  const o=postToolSaveObservation(p);
+  assert.ok(o,'the save is observed as before');
+  assert.equal(o.fromSubagent,true);
+  const main=postToolSaveObservation(input());
+  assert.equal(main.fromSubagent,false);
+  assert.match(fs.readFileSync(path.join(__dirname,'..','hooks','post-tool-save.js'),'utf8'),/if \(!observation\.fromSubagent\) require\('\.\/compact-checkpoint\.js'\)\.recordSave/);
+});

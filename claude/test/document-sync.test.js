@@ -12,19 +12,27 @@ const SCRIPT = path.join(__dirname, '..', 'scripts', 'document-sync.js');
 const { classify, normalizeLf, repoPath, auditManifest, resolveDocument, resolveCommand, parseResolve, gitMerge } = require(SCRIPT);
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
-test('Claude and Codex plugin package versions and audit scripts stay aligned', () => {
+test('each plugin keeps its own manifests on one version, and the audit scripts stay aligned', () => {
   const root = path.resolve(__dirname, '..', '..');
-  const versions = [
+  // 2026-10-29: Claude and Codex are versioned separately. Every Codex release forces the user to re-trust its four hooks
+  // (Codex ties trust to the plugin's content hash), so the Codex plugin is bumped only when its own files change
+  // (docs/plugin-release.md). Within one plugin, every manifest still carries the same version.
+  const claude = [
     require(path.join(root, 'plugin/package.json')).version,
     require(path.join(root, 'plugin/.claude-plugin/plugin.json')).version,
     require(path.join(root, 'plugin/.claude-plugin/marketplace.json')).metadata.version,
     require(path.join(root, 'plugin/.claude-plugin/marketplace.json')).plugins[0].version,
+  ];
+  const codex = [
     require(path.join(root, 'codex-plugins/priors/.codex-plugin/plugin.json')).version,
     require(path.join(root, 'codex-plugins/marketplace.json')).plugins[0].version,
     require(path.join(root, 'codex-plugins/marketplace.json')).metadata.version,
     require(path.join(root, 'codex-plugins/marketplace.json')).version,
   ];
-  assert.deepEqual(versions, Array(8).fill('0.1.69'));
+  for (const [name, versions] of [['claude', claude], ['codex', codex]]) {
+    assert.match(versions[0], /^\d+\.\d+\.\d+$/, name);
+    assert.deepEqual(versions, Array(versions.length).fill(versions[0]), `${name} manifests disagree`);
+  }
   assert.equal(fs.readFileSync(path.join(root, 'plugin/scripts/document-sync.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'codex-plugins/priors/scripts/document-sync.js'), 'utf8'));
   for (const file of ['plugin/skills/priors/SKILL.md', 'codex-plugins/priors/skills/priors/SKILL.md',

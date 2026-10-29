@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
-const expected = ['postToolUse', 'sessionStart', 'stop', 'userPromptSubmit'];
+const expected = ['postToolUse', 'preCompact', 'sessionStart', 'stop', 'userPromptSubmit'];
 
 test('Codex package keeps the compatibility manifest as the selected manifest', () => {
   // Codex 0.165.0 skips hook loading for root Agent Plugins manifests, even with an overlay.
@@ -20,7 +20,7 @@ test('Codex package keeps the compatibility manifest as the selected manifest', 
   const mcp = JSON.parse(fs.readFileSync(path.join(root, manifest.mcpServers), 'utf8'));
   assert.ok(mcp.mcpServers.priors);
   const hooks = JSON.parse(fs.readFileSync(path.join(root, manifest.hooks), 'utf8')).hooks;
-  assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+  assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse', 'PreCompact', 'SessionStart', 'Stop', 'UserPromptSubmit']);
 });
 
 test('Codex update notices read local and published compatibility manifests', async t => {

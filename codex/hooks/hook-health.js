@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const EVENTS = { SessionStart: 'session_start', UserPromptSubmit: 'user_prompt_submit', PostToolUse: 'post_tool_use', Stop: 'stop' };
+const EVENTS = { SessionStart: 'session_start', UserPromptSubmit: 'user_prompt_submit', PostToolUse: 'post_tool_use', Stop: 'stop', PreCompact: 'pre_compact' };
 const HASH = /^sha256:[0-9a-f]{64}$/;
 const DAY = 86400000;
 function digest(bytes) { return 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex'); }
