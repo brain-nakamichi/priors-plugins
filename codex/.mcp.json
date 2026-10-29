@@ -3,9 +3,9 @@
     "priors": {
       "type": "http",
       "url": "https://priors-brain9.vercel.app/mcp",
-      "headers": {
-        "Authorization": "Bearer ${PRIORS_TOKEN_CODEX_V1}"
-      }
+      "bearer_token_env_var": "PRIORS_TOKEN_CODEX_V1",
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 60
     }
   }
 }
