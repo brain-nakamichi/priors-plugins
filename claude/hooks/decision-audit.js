@@ -38,8 +38,7 @@ const TURN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const CANDIDATE_ID = /^pc-[0-9a-f]{12}(?:-[0-9a-f]{8})?-[a-z-]{1,120}$/i;
 // The Priors tools whose success response can carry candidate_receipts. The subtheme memory writes (SQL351) return
 // "<item UUID>@<version>" as the saved reference; the others return "<short ID>@<version>".
-const SUBTHEME_SAVE_TOOLS = ['subtheme_memory_add', 'subtheme_memory_append', 'subtheme_memory_revise', 'subtheme_memory_replace'];
-const SAVE_TOOLS = ['remember', 'summary_record', 'amend', 'capture', 'work_create', 'work_event', ...SUBTHEME_SAVE_TOOLS];
+const {SUBTHEME_SAVE_TOOLS,SAVE_TOOLS}=require('./save-response.js');
 function normalizeSave(save) {
   if (save === undefined || save === null) return undefined;
   if (typeof save !== 'object') throw new Error('invalid save');

@@ -1,6 +1,6 @@
 # Priors プラグイン（Claude Code）
 
-## 候補版 0.1.65
+## 候補版 0.1.66
 
 GEN-1023/1640に合わせ、同じテナントで既存の書込認可を通るClaude/Codexが作成者を問わずサブテーマを編集・削除・復元できる案内へ訂正。現在版の再読・競合の再取得・出所の保持は続けます。移動は方式A（現在版を新IDへ、元履歴を保持）。SQL373と対応ツールの提供後だけ使い、既定dry-runで枠を確認してから確定します。公開とインストールはClaudeの別工程です。
 
@@ -8,7 +8,7 @@ SQL371 の quota 表示に対応。`accounting_mode=refundable` かつ `refunds_
 
 根拠が足りない、昔の経緯や撤回前の判断を確かめたい、正確な数値が必要など、追加の過去情報が役立つとAIが判断した場合は、現在の`recall` / `consult`契約が対応していれば`include_summaries: true`を選べます。数秒余分にかかることがあるため毎回は使わず、通常検索と深い検索の固定順序も設けません。通常検索ではfieldを省略するか`false`にします。`summary_expand`は独立した明示操作です。
 
-現行契約はサーバーが返すMCPツール説明と[GEN-1187](../docs/priors-design/topic-context-and-reconstruction-proposal-20261011.md)です。継続する利用者指示・重要決定/制約/却下案・未完了の約束・重大な運用結果・重要な訂正は、明示的な保存依頼を待たず保持します。過去情報が今回の回答や重要操作を左右し、最新文脈に不足する場合は依存する前に必要な範囲を取得します。利用機能と順序は課題に合わせてAIが選び、毎ターンの検索や固定手順を強制しません。
+現行契約はサーバーが返すMCPツール説明です。保持・取得の方針は GEN-1516 と[重要情報の保持・取得方針](../docs/priors-design/important-information-retention-policy-20261012.md)を参照してください（仕様書の配備状況は記録当時のものです）。旧 GEN-1187 の提案は Priors 内の `designs/topic-context-and-reconstruction-proposal-20261011.md`（文書 `33cd95d0-4dc5-4454-a6ed-0dca6a8d012c` v12）にあり、main 未統合・一部は後続方針で改訂済みのため、現行契約の正本として扱いません。継続する利用者指示・重要決定/制約/却下案・未完了の約束・重大な運用結果・重要な訂正は、明示的な保存依頼を待たず保持します。過去情報が今回の回答や重要操作を左右し、最新文脈に不足する場合は依存する前に必要な範囲を取得します。利用機能と順序は課題に合わせてAIが選び、毎ターンの検索や固定手順を強制しません。
 
 ## 既定の動作
 
@@ -40,7 +40,7 @@ SessionStartは機能の存在を短く案内するだけで、設定・token・
 
 `document-sync.js publish` は台帳の base 版・原文 SHA256、Priors の最新原文、手元の変更を Git `merge-file` で三者マージします。3入力とclean merge結果はstrict UTF-8かつ1 MiB以下です。競合 marker 出力はUTF-8を検証し、最大8 MiBまで `.priors-merge-v<N>.md` sidecar に排他的に保存してPriorsへは書きません。競合が無い場合だけ最新版の version/SHA256 を条件に新しい `operation_id` で書き込みます。Gitが無い・異常終了・入力/clean結果の制限超過も安全側で停止します。結果不明の旧要求は同じ鍵・同じバイトで先に解決してからマージします。マージ書込のreceiptが確認できてもローカル設置が完了するまではそのpendingを保持し、次回 `publish` で設置またはsidecarへの退避を完了します。
 
-手動の文書監査は [`docs/document-audit.md`](../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.65）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
+手動の文書監査は [`docs/document-audit.md`](../docs/document-audit.md) を参照してください。Claude と Codex の同じ `document-sync.js` に読み取り専用の `resolve` と `audit` サブコマンドが含まれます（プラグイン候補版 0.1.66）。`resolve` は通常の `document` read が返す完全な `local_source` tupleだけを使い、明示したrepo内のMarkdownファイルだけを確認します。本文を取得・出力・送信せず、編集や同期もしません。
 
 ```sh
 node scripts/document-sync.js resolve --theme GEN --id <document-uuid> --repo <repository-root> --repo-id <audit-label> [--version N] [--metadata <search-or-read-json>]
@@ -64,4 +64,6 @@ IDかdocument keyをひとつ指定します。`source_match`、`older`、`newer
 
 Claudeの定義は `agents/priors-memory.md` にあり、`priors:priors-memory` としてplugin内から検出されます。Codex用 `agents/priors-memory.toml` は同梱していますが、pluginからの自動検出は確認していません。親は明示theme・session・task facts・許可済みcandidate IDs・関連する親ターンの事実だけを渡し、既定12回のPriors呼出し予算を使います。receiptは親が検証し、agentの報告だけで保存成功としません。
 
-pilotのsynthetic Claude receipt testはhookの検証動作を確認するもので、実クライアントが同じsubagent eventを出す証明ではありません。Codexには現在candidateをacknowledgeするPostToolUse経路が無いため、候補はreviewまでpendingです。pilotの4 review観点と制約は [memory-agent pilot](../docs/priors-memory-agent-pilot-20261024.md) を参照してください。
+pilotのsynthetic Claude receipt testはhookの検証動作を確認するもので、実クライアントが同じsubagent eventを出す証明ではありません。候補版0.1.66のCodexは、同じsession・turnの明示candidate_idと保存応答のcandidate_receiptsが一致した場合だけPostToolUseで確認済みにします。pilotの4 review観点と制約は [memory-agent pilot](../docs/priors-memory-agent-pilot-20261024.md) を参照してください。
+
+候補版0.1.66はCodex側に候補・保存成功・応答終了のローカル支援を追加します。分類と成功応答の解析は`hooks/retention-signals.js`・`hooks/save-response.js`を正本とし、`node scripts/sync-codex-hook-core.js`でCodex用に同梱します（`--check`で一致検査）。Claude側の候補判定・保存成功判定・案内の動作は維持します。公開はClaudeが利用者の許可を得て行います。

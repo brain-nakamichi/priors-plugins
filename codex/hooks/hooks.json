@@ -21,6 +21,29 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__priors__(remember|summary_record|amend|capture|work_create|work_event|subtheme_memory_add|subtheme_memory_append|subtheme_memory_revise|subtheme_memory_replace)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/post-tool-save.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/conversation-end.js\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

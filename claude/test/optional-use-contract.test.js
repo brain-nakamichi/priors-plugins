@@ -27,9 +27,10 @@ test('Claude gives turn-start guidance and a conditional Stop; both clients keep
   assert.match(claudeSkill, /A→B→Cの話題移行検出や一括再構成は行わない/);
   assert.match(claudeSkill, /Recall条件が満たされるときはAIが必要な取得機能を選ぶ/);
   assert.match(codexSkill, /A→B→C topic-switch/);
-  // Codex gives turn-start guidance through UserPromptSubmit but has no blocking Stop hook.
+  // Codex Stop is informational and never blocks or synthesizes a new user turn.
   assert.ok(Object.hasOwn(codex.hooks, 'UserPromptSubmit'));
-  assert.equal(Object.hasOwn(codex.hooks, 'Stop'), false);
+  assert.ok(Object.hasOwn(codex.hooks, 'Stop'));
+  assert.doesNotMatch(fs.readFileSync(path.join(CODEX,'hooks','retention-runtime.js'),'utf8'),/decision:\s*['"]block['"]|continue:\s*false/);
 });
 
 test('Codex documentation describes retention criteria and relevant-time Recall', () => {
