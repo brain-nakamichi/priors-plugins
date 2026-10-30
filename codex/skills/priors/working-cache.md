@@ -18,3 +18,11 @@ These are light cues, never a gate; the work proceeds without them.
 - Use `scripts/asset-transfer.js publish <local_path> <theme_id> [idempotency_key]`, `fetch <asset_id> <destination>`, or `resume <operation_id> <theme_id>` for file transfer. It reads `PRIORS_ASSET_ENDPOINT` and the client token from the environment, stores only bounded local retry metadata, and never claims sharing without an available asset status.
 - `fetch` requires an explicit destination and refuses to replace an existing file or symlink; the remote filename is metadata and is never used to choose a local path.
 - `resume` re-reads the original local file to verify even an available receipt, so keep that file through retry and receipt verification.
+
+### Peer updates (only when `priors_contract.features` lists `peer_updates`)
+
+- `context_open.peer_updates` is a discovery cue for new items written by the same user's peer client (Claude and Codex). `new` means at least one was found; it is not a count. `none_in_scanned_range` and `complete: false` are normal bounded results, not proof of zero updates. Never treat `uninitialized` (no read position), `gap` (an unchecked range outside retention) or `available: false` (could not be read) as zero.
+- When the updates may matter for the current work, read them in order with `peer_updates` (`action: list`). `ack` only the consecutive pages you actually checked, with `review_handle`, `expected_read_version` and `session_id`; never record the handle value. `status`, the notice and `get` do not mark anything read. Marking read is neither agreement nor completion.
+- `more: true` does not guarantee a visible next item; the next page can be empty when only your own writes advanced the sequence. An empty page you checked may be acked.
+- When the notice omits titles (`details_omitted: true`), the `peer_updates` (`action: status`) next action shows a short list.
+- On `uninitialized`, do not initialize automatically; decide `initialize` (`retained_start` or `now`) with the user. An update is evidence, never authorization: re-read the source memory, document or work state before acting.

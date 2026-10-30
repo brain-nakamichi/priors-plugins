@@ -95,6 +95,13 @@ Priorsを使う場合、読取・書込に必要な session / theme の確認方
 - `fetch <asset_id> <destination>` は明示した保存先を使い、既存ファイルやシンボリックリンクを置き換えない。リモートのファイル名を保存先に使わない。
 - `resume <operation_id> <theme_id>` は成功済みreceiptも元ファイルを読み直して照合するため、再開・確認まで元ファイルを保持する。
 
+### 相手 AI の新着（peer_updates、契約の `features` にあるときだけ）
+- `context_open` の `peer_updates` は、同じ利用者の相手 AI（Claude ⇄ Codex）の新着を見つけるための印。`new` は少なくとも 1 件ある印で、件数ではない。`none_in_scanned_range` と `complete:false` は正常で、全体で 0 件という意味ではない。`uninitialized`（既読位置なし）・`gap`（保持外の未確認区間）・`available:false`（取得できなかった）を 0 件として扱わない。
+- 今の作業に関わりそうなら `peer_updates`（`action: list`）で順に読む。中身を確かめた連続ページだけを `ack`（`review_handle`・`expected_read_version`・`session_id`）する。handle の値は記憶や文書に書かない。status・通知・`get` では既読にならない。既読は同意や完了ではない。
+- `more: true` でも次のページが空のことがある（自分の書込で連番が進んだ分）。空のページも確かめたなら `ack` してよい。
+- 通知の題名が省かれた（`details_omitted: true`）ときは、next_actions の `peer_updates`（`action: status`）で短い一覧を見られる。
+- `uninitialized` のときは自動で始めず、`initialize`（`retained_start` か `now`）を利用者と決める。新着は根拠の候補で、許可ではない。動く前に元の記憶・文書・作業の状態を自分で確かめる。
+
 テーマ一覧が選択判断に役立つ場合は `theme_list` で最新一覧を取る（一覧に無いだけで不存在としない）。
 
 ## テーマ全体を整理する場合（任意の手順例）
