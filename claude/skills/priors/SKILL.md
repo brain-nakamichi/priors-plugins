@@ -171,6 +171,10 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 | `rate_limited` | `retry_after_seconds` 待って同じ `idempotency_key` で 1 回だけ再試行 |
 | `user_quota_exceeded` / `capacity_owner_unassigned` | 容量上限・責任者未割当。再試行せず、`charged_to: self` なら利用者に `/#/usage` の整理を案内、他はテーマ管理者へ |
 
+## History の登録が not_found になるとき
+
+`history` / `history_record` が利用できる場合、登録した要約と話題の固定版、その出典が今も読めるか確認する。`current` の claim は、出典の改訂・撤回・期限などで利用できなくなることがある。登録が `not_found` でも原因を出典の古さと断定せず、読める出典で本文と出典を見直してから登録し直す。通すために `historical` へ機械的に変更したり、本文を確認せず新しい版へ出典だけを付け替えたりしない。
+
 ## サブテーマの移動と版付きの追跡
 
 `subtheme_memory_move` が公開され、契約の `features` に `subtheme_memory_move` がある場合に使います。同じ親テーマの移動元/先の現在head版と元項目の版を読み直し、1〜20件を一括で渡します。既定の `dry_run: true` は書込みを残さず件数・枠を見積もるだけで、返るheadは予測値です。確定は `dry_run: false`。同じ実行の再送は同じ冪等キーと内容を使います。replayed応答のheadと枠は元の実行時点なので、次の操作前に読み直します。現在版は新IDへ、元は論理削除して履歴を保持し、`movements` のowner/item/固定版/本文ハッシュで双方向に辿れます。`subtheme_memory_get` はサブテーマUUID用で、`known_version` の固定版を返します（通常の `get` は親記憶短ID用）。本文を黙って移動先へ切り替えません。`restore` は元を再予約して戻しますが移動先を消しません。枠不足や競合では全体が取り消されるので、成功receiptなしに移動済みと扱わず、独自のコピー/削除に切り替えません。
