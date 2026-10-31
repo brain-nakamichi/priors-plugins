@@ -147,7 +147,7 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 
 訂正・撤回・pin は `remember` の作り直しではなく `amend`。リンクは `{type, target, note?, dst_version?}` で渡す。`target` は宛先の短ID、`supports` / `refutes` / `amends` は `dst_version` 必須。`get` の `direction` / `from` / `to` は渡さない。
 - 訂正は revise、変化時点が説明できる置き換えは supersede、取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証は dispute。所有者以外の記憶は変更不可（§3.1）。「消して」と言われたら retract を提案する。実データの削除は利用者がブラウザの使用容量（`/#/usage`）で行う。
-- **pin**: 常に出したい記憶は Tier A、通常の関連記憶は Tier B。Tier A はブラウザの人間による昇格だけ、Tier B は所有者のエージェントが自律的に設定・変更する。Tier B は `pin_when.tags` か `pin_when.work` の非空条件が必須。作業種別を選ばせる必須フィルタは使わない。
+- **pin**: 常に出したい記憶は Tier A、通常の関連記憶は Tier B。Tier A はブラウザの人間が昇格・確認付き解除・順位変更を行う、Tier B は所有者のエージェントが自律的に設定・変更する。Tier B は `pin_when.tags` か `pin_when.work` の非空条件が必須。作業種別を選ばせる必須フィルタは使わない。
 
 ## 6. 終える：`checkpoint`
 
@@ -178,3 +178,8 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 ## サブテーマの移動と版付きの追跡
 
 `subtheme_memory_move` が公開され、契約の `features` に `subtheme_memory_move` がある場合に使います。同じ親テーマの移動元/先の現在head版と元項目の版を読み直し、1〜20件を一括で渡します。既定の `dry_run: true` は書込みを残さず件数・枠を見積もるだけで、返るheadは予測値です。確定は `dry_run: false`。同じ実行の再送は同じ冪等キーと内容を使います。replayed応答のheadと枠は元の実行時点なので、次の操作前に読み直します。現在版は新IDへ、元は論理削除して履歴を保持し、`movements` のowner/item/固定版/本文ハッシュで双方向に辿れます。`subtheme_memory_get` はサブテーマUUID用で、`known_version` の固定版を返します（通常の `get` は親記憶短ID用）。本文を黙って移動先へ切り替えません。`restore` は元を再予約して戻しますが移動先を消しません。枠不足や競合では全体が取り消されるので、成功receiptなしに移動済みと扱わず、独自のコピー/削除に切り替えません。
+
+
+## Browser Tier A control
+
+Tier A の解除・順位変更は人間がブラウザの詳細画面で確認します。解除時は、同じ actor の元の AI 所有記憶で、全版の来歴と pin 由来の保護を証明できる場合だけ保護も外れます。人間由来・不明・別 actor の保護は残ります。解除後も別 client へ編集権限は移りません。本文の編集後は人間が再昇格すると保護が付き直ります。AI は解除・順位変更・保護解除を代行せず、人間の実行モードを名乗りません。解除は本文の指示を取り消す操作ではありません。

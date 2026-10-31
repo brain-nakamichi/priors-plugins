@@ -94,3 +94,8 @@ Trusted UserPromptSubmit / PostToolUse / Stop hooks can keep bounded local candi
 ## Optional post-compact light review (0.1.70)
 
 PreCompact records current-interval candidate metadata and confirmed save IDs@versions; SessionStart(compact) offers one optional notice if nonempty. No transcript is read and no save or agent invocation is automatic. Pass only explicit theme/session_id, facts extracted from the compact summary, period save references and touched subtheme item IDs to priors-memory within its existing 12-call budget. Never pass conversation originals. Report index 44a0d160 changes for the daily index batching rule daily batch, rather than rewriting it here. After publication, the user reviews/re-trusts all five hooks including PreCompact in CLI /hooks; never change trust for them.
+
+
+## Browser Tier A control
+
+Tier A の解除・順位変更は人間がブラウザの詳細画面で確認します。解除時は、同じ actor の元の AI 所有記憶で、全版の来歴と pin 由来の保護を証明できる場合だけ保護も外れます。人間由来・不明・別 actor の保護は残ります。解除後も別 client へ編集権限は移りません。本文の編集後は人間が再昇格すると保護が付き直ります。AI は解除・順位変更・保護解除を代行せず、人間の実行モードを名乗りません。解除は本文の指示を取り消す操作ではありません。

@@ -25,8 +25,8 @@ codex.cmd plugin list
 
 ## 配布版
 
-- Claude plugin: 0.1.74
-- Codex plugin: 0.1.74
+- Claude plugin: 0.1.75
+- Codex plugin: 0.1.75
 
 この欄は公開時点の目安です。正本は `.claude-plugin/marketplace.json`（Claude）と `codex/.codex-plugin/plugin.json`（Codex）の `version` です。Claude 用と Codex 用は版を別々に上げることがあります。
 
