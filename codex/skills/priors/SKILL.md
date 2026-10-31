@@ -103,3 +103,7 @@ Tier A の解除・順位変更は人間がブラウザの詳細画面で確認�
 ## Independent Codex hook package
 
 The `priors` package supplies skills and MCP; `priors-hooks` supplies the five optional hooks and all their executable dependencies. Update them independently. A core-only skill/document update does not require reviewing unchanged hook code. First migrate the core to 0.1.76 or later, then install/enable `priors-hooks@priors` and let the user review each hook in CLI `/hooks`. Never auto-write trust, load updated executable code from the core into a stable hook loader, or recommend bypassing trust.
+
+## Bounded subtheme reading
+
+For an overview, prefer subtheme_detail with content=metadata and item_state=active (limit 1–20, default 20; budget_tokens 800–4000, default 2000). Items contain only item_id/title/state/version. Continue only while more=true: pass next_after as after_item_id, head_version as known_head_version, and generation as known_generation. On version_conflict restart from the first page. Read only the needed body with subtheme_memory_get, fixing known_version; read parent references separately with subtheme_references. Omitted options retain the existing full/all response. A budget_too_small response requires increasing the budget, not skipping items.

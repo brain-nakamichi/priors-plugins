@@ -183,3 +183,7 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 ## Browser Tier A control
 
 Tier A の解除・順位変更は人間がブラウザの詳細画面で確認します。解除時は、同じ actor の元の AI 所有記憶で、全版の来歴と pin 由来の保護を証明できる場合だけ保護も外れます。人間由来・不明・別 actor の保護は残ります。解除後も別 client へ編集権限は移りません。本文の編集後は人間が再昇格すると保護が付き直ります。AI は解除・順位変更・保護解除を代行せず、人間の実行モードを名乗りません。解除は本文の指示を取り消す操作ではありません。
+
+## Bounded subtheme reading
+
+For an overview, prefer subtheme_detail with content=metadata and item_state=active (limit 1–20, default 20; budget_tokens 800–4000, default 2000). Items contain only item_id/title/state/version. Continue only while more=true: pass next_after as after_item_id, head_version as known_head_version, and generation as known_generation. On version_conflict restart from the first page. Read only the needed body with subtheme_memory_get, fixing known_version; read parent references separately with subtheme_references. Omitted options retain the existing full/all response. A budget_too_small response requires increasing the budget, not skipping items.
