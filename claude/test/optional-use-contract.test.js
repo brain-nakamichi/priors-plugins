@@ -10,9 +10,11 @@ const PLUGIN = path.join(__dirname, '..');
 const MIRROR_CODEX = path.join(PLUGIN, '..', 'codex');
 const CODEX = fs.existsSync(MIRROR_CODEX) ? MIRROR_CODEX : path.join(PLUGIN, '..', 'codex-plugins', 'priors');
 
+const CODEX_HOOKS=fs.existsSync(path.join(PLUGIN,'../codex-hooks'))?path.join(PLUGIN,'../codex-hooks'):path.join(PLUGIN,'../codex-plugins/priors-hooks');
+
 test('Claude gives turn-start guidance and a conditional Stop; both clients keep important information and retrieve relevant history without fixed flow', () => {
   const claude = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8'));
-  const codex = JSON.parse(fs.readFileSync(path.join(CODEX, 'hooks', 'hooks.json'), 'utf8'));
+  const codex = JSON.parse(fs.readFileSync(path.join(CODEX_HOOKS,'hooks', 'hooks.json'), 'utf8'));
   assert.ok(Object.hasOwn(claude.hooks, 'UserPromptSubmit'));
   assert.ok(Object.hasOwn(claude.hooks, 'Stop'));
   assert.ok(Object.hasOwn(claude.hooks, 'PostToolUse'));
@@ -30,7 +32,7 @@ test('Claude gives turn-start guidance and a conditional Stop; both clients keep
   // Codex Stop is informational and never blocks or synthesizes a new user turn.
   assert.ok(Object.hasOwn(codex.hooks, 'UserPromptSubmit'));
   assert.ok(Object.hasOwn(codex.hooks, 'Stop'));
-  assert.doesNotMatch(fs.readFileSync(path.join(CODEX,'hooks','retention-runtime.js'),'utf8'),/decision:\s*['"]block['"]|continue:\s*false/);
+  assert.doesNotMatch(fs.readFileSync(path.join(CODEX_HOOKS,'hooks','retention-runtime.js'),'utf8'),/decision:\s*['"]block['"]|continue:\s*false/);
 });
 
 test('Codex documentation describes retention criteria and relevant-time Recall', () => {

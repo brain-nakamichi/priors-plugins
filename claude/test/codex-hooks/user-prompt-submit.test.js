@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto');
-const {handle,statePath,MAX_BYTES,MAX_SESSIONS,MAX_TURNS}=require('../hooks/retention-runtime.js');
+const hookRoot=fs.existsSync(path.resolve(__dirname,'../../../codex-hooks'))?path.resolve(__dirname,'../../../codex-hooks'):path.resolve(__dirname,'../../../codex-plugins/priors-hooks');
+const {handle,statePath,MAX_BYTES,MAX_SESSIONS,MAX_TURNS}=require(hookRoot+'/hooks/retention-runtime.js');
 const sid=crypto.randomUUID(),turn=()=>crypto.randomUUID();
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'priors-codex-retention-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  return {dir,env:{PLUGIN_DATA:dir},read(){return JSON.parse(fs.readFileSync(statePath({PLUGIN_DATA:dir}),'utf8'));}};}

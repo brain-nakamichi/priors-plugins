@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { recordDecision } = require('../hooks/decision-audit.js');
+const { recordDecision } = require('./lib/decision-audit.js');
 try {
   const args = process.argv.slice(2);
   if (args.length !== 2 || args[0] !== '--kind' || !['suspected', 'uninspectable', 'reported'].includes(args[1])) throw new Error();

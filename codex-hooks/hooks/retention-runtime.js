@@ -9,7 +9,7 @@ const MAX_BYTES=65536,MAX_SESSIONS=16,MAX_TURNS=8,MAX_SAVES=20,TTL=7*86400000;
 const CATEGORIES=['remember-candidate','continuing-request-candidate','unresolved-candidate'];
 const SAVE_REF=/^(?:[A-Z][A-Z0-9]{1,7}-(?:c|w)?[0-9]+|[0-9a-f-]{36})@[1-9][0-9]{0,9}$/i;
 const CANDIDATE=/^pc-[0-9a-f]{12}-[0-9a-f]{8}-[a-z-]{1,120}$/;
-function statePath(env){return env.PRIORS_CODEX_HOOK_STATE_FILE?path.resolve(env.PRIORS_CODEX_HOOK_STATE_FILE):
+function statePath(env){env=require('./state-environment.js').stateEnvironment(env);return env.PRIORS_CODEX_HOOK_STATE_FILE?path.resolve(env.PRIORS_CODEX_HOOK_STATE_FILE):
  path.join(env.PLUGIN_DATA||path.join(os.homedir(),'.priors','codex'),'retention-state.json');}
 function ownKeys(v,keys){return v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).every(k=>keys.includes(k));}
 function validState(s){return ownKeys(s,['schema','sessions'])&&s.schema===1&&Array.isArray(s.sessions)&&s.sessions.length<=MAX_SESSIONS&&s.sessions.every(x=>
@@ -95,6 +95,7 @@ function stop(input,env){
  });
 }
 function handle(input,env=process.env){
+ env=require('./state-environment.js').stateEnvironment(env);
  if(!input||!UUID.test(input.session_id)||!UUID.test(input.turn_id))return null;
  if(input.hook_event_name==='UserPromptSubmit')return prompt(input,env);
  if(input.hook_event_name==='PostToolUse')return save(input,env);

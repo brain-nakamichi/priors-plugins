@@ -36,7 +36,7 @@ for(const client of ['claude','codex']) {
  });
 }
 test('Codex real runtime feeds metadata and excludes harness/secret/subagent inputs',t=>{
- const env=fixture(t),{handle}=require('../../codex-plugins/priors/hooks/retention-runtime.js');
+ const env=fixture(t),{handle}=require('../../codex-plugins/priors-hooks/hooks/retention-runtime.js');
  const input={hook_event_name:'UserPromptSubmit',session_id:session,turn_id:other,prompt:'次からは日本語で短く説明してほしい'};
  assert.ok(handle(input,env));core.preCompact('codex',session,env);assert.match(core.afterCompact('codex',session,env),/候補 1 件/);
  for(const extra of [{agent_id:'synthetic'},{source:'system'},{prompt:'Message Type: FINAL_ANSWER'},{prompt:'次から sk-proj-abcdefghijklmnopqrstuvwxyz0123456789 を使って'}])handle({...input,...extra,turn_id:'33333333-3333-4333-8333-333333333333'},env);
@@ -44,7 +44,7 @@ test('Codex real runtime feeds metadata and excludes harness/secret/subagent inp
 });
 test('compact adapters ignore transcript path, subagents and unrelated events',t=>{
  for(const client of ['claude','codex']){
-  const env=fixture(t),adapter=require(client==='claude'?'../hooks/compact.js':'../../codex-plugins/priors/hooks/compact.js');
+  const env=fixture(t),adapter=require(client==='claude'?'../hooks/compact.js':'../../codex-plugins/priors-hooks/hooks/compact.js');
   core.recordSave(client,session,['GEN-5@1'],[],env);
   adapter.handle({hook_event_name:'PreCompact',session_id:session,transcript_path:'Z:/NEVER_READ',prompt:'NEVER_PERSIST'},env);
   assert.equal(adapter.handle({hook_event_name:'SessionStart',source:'compact',session_id:session,agent_id:'x'},env),null);

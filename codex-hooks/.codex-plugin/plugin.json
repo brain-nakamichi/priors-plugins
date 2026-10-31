@@ -1,0 +1,13 @@
+{
+  "name": "priors-hooks",
+  "version": "0.1.0",
+  "description": "Priorsの保存候補・保存成功・コンパクト点検を支える独立フック",
+  "author": { "name": "Priors" },
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Priors Hooks",
+    "shortDescription": "Priorsの任意の保存支援フック",
+    "developerName": "Priors",
+    "category": "Productivity"
+  }
+}

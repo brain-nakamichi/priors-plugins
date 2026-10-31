@@ -64,7 +64,7 @@ function declarationHashes(root) {
     // TomlValue serialization omits absent Options; version_for_toml sorts all JSON object keys.
     const identity = { event_name: label, hooks: [{ type: 'command', command: h.command, timeout: 10, async: h.async ?? false }] };
     if (g.matcher !== undefined) identity.matcher = g.matcher;
-    return { event, key: `priors@priors:hooks/hooks.json:${label}:0:0`, hash: digest(stableJson(identity)) };
+    return { event, key: `priors-hooks@priors:hooks/hooks.json:${label}:0:0`, hash: digest(stableJson(identity)) };
   });
 }
 
@@ -130,7 +130,7 @@ function parseUserState(text) {
 }
 function legacyBaseline(configFile) {
   const hash = crypto.createHash('sha256');
-  lengthPrefix(hash, Buffer.from(configFile)); lengthPrefix(hash, Buffer.from('priors@priors'));
+  lengthPrefix(hash, Buffer.from(configFile)); lengthPrefix(hash, Buffer.from('priors-hooks@priors'));
   const file = path.join(path.dirname(configFile), '.hook-trust', hash.digest('hex'));
   const value = readStable(file, 80).toString('utf8'); if (!HASH.test(value)) throw Error('unknown_baseline'); return value;
 }

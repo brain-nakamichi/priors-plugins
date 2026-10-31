@@ -1,5 +1,13 @@
 # Priors Codex プラグイン
 
+## 0.1.76候補：本体とフックを独立配布
+
+本体 `priors@priors` はMCP・skill・記憶担当・手動CLI、`priors-hooks@priors` 0.1.0候補は5フックと全実行依存を持ちます。本体にはフックの定義/既定ディレクトリを残しません。本体だけの更新ではフック側を再インストールしないでください。
+
+旧版からは先に本体を0.1.76以上へ更新し、その後 `codex.cmd plugin add priors-hooks@priors`。利用者がCLI `/hooks` で5フックを確認・信頼してアプリを再起動します。daemon不一致は Run without daemon this time。初回切替とフック側の更新では再信頼が必要です。自動の設定/信頼の変更はしません。
+
+以下は分離前の履歴です。古い4フック/同梱/毎回再信頼の説明は現在の手順ではありません。
+
 ## 候補版 0.1.69
 
 Codex 0.165.0が実際に読むLegacyの`.mcp.json`を修正しました。Claude形式の`headers.Authorization`は無視されるため、`bearer_token_env_var: "PRIORS_TOKEN_CODEX_V1"`で環境変数を読みます。通常は同梱だけで接続でき、`config.toml`への追記は不要です。既存の`[mcp_servers.priors]`は同梱設定より優先され、同名で二重接続にはなりません。既存設定を自動で変更・削除しません。

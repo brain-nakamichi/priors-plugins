@@ -3,8 +3,8 @@
 // One maintained source, two self-contained distributable packages. Never require outside an installed plugin.
 const fs=require('node:fs'),path=require('node:path');
 const SOURCE=path.resolve(__dirname,'../hooks');
-const devTarget=path.resolve(__dirname,'../../codex-plugins/priors');
-const TARGET=path.join(fs.existsSync(devTarget)?devTarget:path.resolve(__dirname,'../../codex'),'hooks/shared');
+const devTarget=path.resolve(__dirname,'../../codex-plugins/priors-hooks');
+const TARGET=path.join(fs.existsSync(devTarget)?devTarget:path.resolve(__dirname,'../../codex-hooks'),'hooks/shared');
 const FILES=['bounded-input.js','sensitive-input.js','retention-signals.js','save-response.js','compact-checkpoint.js'];
 function sync(check=false){
  for(const file of FILES){const source=fs.readFileSync(path.join(SOURCE,file),'utf8').replace(/\r\n?/g,'\n');

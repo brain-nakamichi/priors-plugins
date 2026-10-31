@@ -3,6 +3,7 @@
 const {readHookInput}=require('./shared/bounded-input.js');
 const checkpoint=require('./shared/compact-checkpoint.js');
 function handle(input,env=process.env) {
+  env=require('./state-environment.js').stateEnvironment(env);
   if (!input || input.agent_id || input.agent_type) return null;
   if(input.hook_event_name==='PreCompact') { checkpoint.preCompact('codex',input.session_id,env); return null; }
   if(input.hook_event_name==='SessionStart' && input.source==='compact') {

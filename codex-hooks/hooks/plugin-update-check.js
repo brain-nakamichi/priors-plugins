@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {coreVersion} from './core-version.js';
 
-const CLIENT = 'codex';
+const CLIENT = 'codex-hooks';
 // GEN-541 (historical; 0.1.67 uses compatibility manifest): 公開リポの実パスは codex/plugin.json（旧 codex/priors/plugin.json は 404 で通知が一度も出なかった）
-const DEFAULT_URL = 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/.codex-plugin/plugin.json';
+const DEFAULT_URL = 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex-hooks/.codex-plugin/plugin.json';
 const MAX_BODY = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 1500;
 const NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -43,7 +44,7 @@ export async function checkPluginUpdate(env = process.env) {
     const file = statePath(env); const state = readState(file); const now = Date.now(); const previous = state[CLIENT];
     if (previous && previous.version === latest && now - Number(previous.notifiedAt) < NOTIFY_INTERVAL_MS) return null;
     state[CLIENT] = { version: latest, notifiedAt: now }; writeState(file, state);
-    return `Priorsプラグインに更新があります（Codex: ${current} → ${latest}）。CodexのPriors marketplaceを更新してからプラグインを再インストールし、Codexを再起動してください。token・MCP設定は変更しません。`;
+    return `Priors Hooksに更新があります（${current} → ${latest}）。marketplaceを更新し、priors-hooks@priorsを更新後、CLI /hooksで5フックを確認・再信頼してください。token・MCP設定は変更しません。`;
   } catch { return null; } finally { clearTimeout(timer); }
 }
 
@@ -59,9 +60,9 @@ function allowedMcpUrl(raw, env) {
   } catch { return null; }
 }
 export async function checkPluginContract(env = process.env) {
+  const current=coreVersion(env);if(!current)return null;
   const token = env.PRIORS_TOKEN_CODEX_V1; const url = allowedMcpUrl(env.PRIORS_MCP_URL || DEFAULT_MCP_URL, env);
   if (!token || !url || typeof fetch !== 'function') return null;
-  const current = currentVersion();
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), Number(env.PRIORS_PLUGIN_UPDATE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
   try {
     const res = await fetch(url, { method: 'POST', redirect: 'error', signal: controller.signal,
@@ -71,7 +72,7 @@ export async function checkPluginContract(env = process.env) {
     if (!res.ok) return null; const text = await res.text(); if (Buffer.byteLength(text, 'utf8') > MAX_BODY) return null;
     const result = (JSON.parse(text) || {}).result; if (!result || typeof result !== 'object') return null;
     const contract = result.priors_contract || (result._meta && result._meta.priors_contract) || null;
-    const minimum = contract && contract.minimum_plugin ? contract.minimum_plugin[CLIENT] : undefined;
+    const minimum = contract && contract.minimum_plugin ? contract.minimum_plugin.codex : undefined;
     const flagged = Array.isArray(result.warnings) && result.warnings.includes('plugin_outdated');
     if (!(flagged || (parseVersion(minimum) && newer(minimum, current)))) return null;
     const required = parseVersion(minimum) ? minimum : 'server が要求する版';
@@ -80,4 +81,20 @@ export async function checkPluginContract(env = process.env) {
     state[key] = { version: required, notifiedAt: now }; writeState(file, state);
     return `Priorsサーバーはプラグイン ${required} 以上を要求しています（Codex: ${current}）。CodexのPriors marketplaceを更新してからプラグインを再インストールし、Codexを再起動してください。token・MCP設定は変更しません。`;
   } catch { return null; } finally { clearTimeout(timer); }
+}
+
+export async function checkCoreUpdate(env=process.env){
+ const current=coreVersion(env);if(!current)return null;
+ const url=allowedUrl(env.PRIORS_CORE_PLUGIN_UPDATE_URL||'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/.codex-plugin/plugin.json',env);
+ if(!url||typeof fetch!=='function')return null;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),Number(env.PRIORS_PLUGIN_UPDATE_TIMEOUT_MS)||DEFAULT_TIMEOUT_MS);
+ try{
+  const res=await fetch(url,{redirect:'error',signal:controller.signal,headers:{accept:'application/json'}});
+  if(!res.ok)return null;const text=await res.text();if(Buffer.byteLength(text)>MAX_BODY)return null;
+  const latest=JSON.parse(text).version;if(!newer(latest,current))return null;
+  const file=statePath(env),state=readState(file),previous=state['codex-core'],now=Date.now();
+  if(previous&&previous.version===latest&&now-Number(previous.notifiedAt)<NOTIFY_INTERVAL_MS)return null;
+  state['codex-core']={version:latest,notifiedAt:now};writeState(file,state);
+  return `Priors本体に更新があります（${current} → ${latest}）。priors@priorsを更新してください。priors-hooksを更新しない場合、フックの再信頼は不要です。`;
+ }catch{return null;}finally{clearTimeout(timer);}
 }

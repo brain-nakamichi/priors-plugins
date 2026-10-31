@@ -1,8 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+const hookRoot=fs.existsSync(path.resolve(__dirname,'../../../codex-hooks'))?path.resolve(__dirname,'../../../codex-hooks'):path.resolve(__dirname,'../../../codex-plugins/priors-hooks');
 const crypto = require('node:crypto');
-const { inspectHooks, healthNotice, contentHash, declarationHashes, parseUserState } = require('../hooks/hook-health.js');
+const { inspectHooks, healthNotice, contentHash, declarationHashes, parseUserState } = require(hookRoot+'/hooks/hook-health.js');
 function fixture(t, existingRoot) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-health-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -10,7 +11,7 @@ function fixture(t, existingRoot) {
   fs.mkdirSync(home);
   if (!existingRoot) {
     fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
-    fs.copyFileSync(path.join(__dirname, '../hooks/hooks.json'), path.join(root, 'hooks/hooks.json'));
+    fs.copyFileSync(path.join(hookRoot, 'hooks/hooks.json'), path.join(root, 'hooks/hooks.json'));
     fs.writeFileSync(path.join(root, 'script.js'), 'synthetic bundle\n');
   }
   const config = path.join(home, 'config.toml');
@@ -67,7 +68,7 @@ test('unknown TOML, absent legacy baseline, unknown hook syntax or inaccessible 
   fs.unlinkSync(x.config); assert.equal(inspectHooks(x.env, x.root), null);
 });
 test('TOML generated single/literal keys, comments and escaped quotes are read without reflecting values', () => {
-  const state = parseUserState("[hooks.state.'priors@priors:hooks/hooks.json:stop:0:0'] # comment\nenabled = false # comment\n");
+  const state = parseUserState("[hooks.state.'priors-hooks@priors:hooks/hooks.json:stop:0:0'] # comment\nenabled = false # comment\n");
   assert.equal(state.values().next().value.enabled, false);
   assert.throws(() => parseUserState('[[hooks.state]]\nx=true'));
 });
@@ -89,9 +90,9 @@ test('no plugin launch context, malformed notice state or busy lock cannot creat
   fs.unlinkSync(file); fs.mkdirSync(file + '.lock'); assert.equal(healthNotice(x.env, x.root), null);
 });
 test('UserPromptSubmit adds health guidance once without dropping its independent save candidate', t => {
-  const root = path.resolve(__dirname, '..'), x = fixture(t, root);
+  const root = hookRoot, x = fixture(t, root);
   x.write(rows => { rows.find(r => r.key.includes('post_tool_use')).enabled = false; });
-  const { buildPromptOutput } = require('../hooks/user-prompt-submit.js');
+  const { buildPromptOutput } = require(hookRoot+'/hooks/user-prompt-submit.js');
   const input = { hook_event_name: 'UserPromptSubmit', session_id: crypto.randomUUID(), turn_id: crypto.randomUUID(), prompt: '今後は日本語で簡潔に回答する' };
   const first = buildPromptOutput(input, x.env);
   assert.match(first.systemMessage, /PostToolUse（無効）/);

@@ -15,6 +15,7 @@ const ROOT = path.join(__dirname, '..');
 const DEV_CODEX = path.join(ROOT, '..', 'codex-plugins', 'priors');
 const CODEX = fs.existsSync(DEV_CODEX) ? DEV_CODEX : path.join(ROOT, '..', 'codex');
 
+const CODEX_HOOKS=fs.existsSync(path.join(ROOT,'../codex-plugins/priors-hooks'))?path.join(ROOT,'../codex-plugins/priors-hooks'):path.join(ROOT,'../codex-hooks');
 // All values are synthetic, built here. Tests never read a live credential.
 const cases = [
   ['credential_prefix', 'pv1h' + 'q'.repeat(59)],
@@ -84,7 +85,7 @@ test('GEN-940 redacted output and shell variable references remain clear on both
     'Bearer $t\nAuthorization: Bearer synthetic-sensitive-example',
   ];
   for (const root of [ROOT, CODEX]) {
-    const inspect = require(path.join(root, 'hooks', 'sensitive-input.js')).inspectSensitiveInput;
+    const inspect = require(path.join(root===CODEX?CODEX:root,root===CODEX?'scripts/lib':'hooks','sensitive-input.js')).inspectSensitiveInput;
     for (const prompt of clear) assert.deepEqual(inspect(prompt), { state: 'clear', codes: [], suppress_auto_recall: false });
     for (const prompt of suspect) {
       assert.equal(inspect(prompt).state, 'suspected');
@@ -198,14 +199,14 @@ test('deferred cues use existing categories and shared guidance; hand alone is l
 });
 
 test('Codex helper copies match and verified native hooks use bounded candidate guidance', () => {
-  for (const name of ['sensitive-input.js', 'bounded-input.js']) assert.equal(fs.readFileSync(path.join(ROOT, 'hooks', name), 'utf8'), fs.readFileSync(path.join(CODEX, 'hooks', name), 'utf8'));
-  const hooks = JSON.parse(fs.readFileSync(path.join(CODEX, 'hooks', 'hooks.json'), 'utf8')).hooks;
+  for (const name of ['sensitive-input.js', 'bounded-input.js']) assert.equal(fs.readFileSync(path.join(ROOT, 'hooks', name), 'utf8'), fs.readFileSync(path.join(CODEX, 'scripts/lib', name), 'utf8'));
+  const hooks = JSON.parse(fs.readFileSync(path.join(CODEX_HOOKS, 'hooks', 'hooks.json'), 'utf8')).hooks;
   assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse','PreCompact','SessionStart','Stop','UserPromptSubmit']);
   assert.ok(hooks.Stop);
   assert.equal(hooks.UserPromptSubmit.length, 1);
   const auditFile = path.join(os.tmpdir(), `priors-codex-guidance-no-audit-${process.pid}.jsonl`);
   fs.rmSync(auditFile, { force: true });
-  const promptHook = spawnSync(process.execPath, [path.join(CODEX, 'hooks', 'user-prompt-submit.js')], {
+  const promptHook = spawnSync(process.execPath, [path.join(CODEX_HOOKS, 'hooks', 'user-prompt-submit.js')], {
     input: JSON.stringify({ prompt: '今後の方針を採用 synthetic-private-prompt', hook_event_name: 'UserPromptSubmit',session_id:'11111111-1111-4111-8111-111111111111',turn_id:'22222222-2222-4222-8222-222222222222' }), encoding: 'utf8',
     env: { ...process.env, PRIORS_DECISION_AUDIT_FILE: auditFile,PRIORS_CODEX_HOOK_STATE_FILE:auditFile+'.state' },
   });
@@ -280,7 +281,7 @@ test('legacy audit notices stay separate from Codex native-turn candidate remind
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-safe-notice-'));
   try {
     for (const [root, client] of [[ROOT, 'claude'], [CODEX, 'codex']]) {
-      const audit = require(path.join(root, 'hooks', 'decision-audit.js'));
+      const audit = require(path.join(root===CODEX?CODEX:root,root===CODEX?'scripts/lib':'hooks','decision-audit.js'));
       const env = { ...process.env, PRIORS_AUTO_REMEMBER: '1', PRIORS_DECISION_AUDIT_FILE: path.join(dir, path.basename(root) + '-audit'), PRIORS_STOP_DIAGNOSTIC_FILE: path.join(dir, 'stop'), PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidate') };
       const notice = audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook', inputSafety: 'suspected', promptHash: 'a'.repeat(64) }, env);
       assert.equal(notice.event.prompt_sha256, undefined);
@@ -288,12 +289,12 @@ test('legacy audit notices stay separate from Codex native-turn candidate remind
       audit.recordDecision({ decision: 'skip', client, phase: 'conversation-end' }, env);
       assert.equal(audit.inputSafetySummary(env).suspected, 1);
       if (root === ROOT) {
-        const stop = spawnSync(process.execPath, [path.join(root, 'hooks', 'conversation-end.js')], { env, input: '{}', encoding: 'utf8' });
+        const stop = spawnSync(process.execPath, [path.join(root===CODEX?CODEX_HOOKS:root, 'hooks', 'conversation-end.js')], { env, input: '{}', encoding: 'utf8' });
         assert.equal(stop.status, 0); assert.match(stop.stdout, /秘密疑い 1件/); assert.match(stop.stdout, /作業項目があるか/);
       } else {
-        assert.ok(fs.existsSync(path.join(root, 'hooks', 'conversation-end.js')));
-        assert.ok(JSON.parse(fs.readFileSync(path.join(root, 'hooks', 'hooks.json'), 'utf8')).hooks.Stop);
-        const stop=spawnSync(process.execPath,[path.join(root,'hooks','conversation-end.js')],{env,input:'{}',encoding:'utf8'});
+        assert.ok(fs.existsSync(path.join(root===CODEX?CODEX_HOOKS:root, 'hooks', 'conversation-end.js')));
+        assert.ok(JSON.parse(fs.readFileSync(path.join(root===CODEX?CODEX_HOOKS:root, 'hooks', 'hooks.json'), 'utf8')).hooks.Stop);
+        const stop=spawnSync(process.execPath,[path.join(root===CODEX?CODEX_HOOKS:root, 'hooks','conversation-end.js')],{env,input:'{}',encoding:'utf8'});
         assert.equal(stop.status,0);assert.equal(stop.stdout,'');
       }
       audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook' }, env);
@@ -303,7 +304,7 @@ test('legacy audit notices stay separate from Codex native-turn candidate remind
 });
 
 test('both clients register end reminders and successful save observation', () => {
-  const codexHooks = require(path.join(CODEX, 'hooks', 'hooks.json')).hooks;
+  const codexHooks = require(path.join(CODEX_HOOKS, 'hooks', 'hooks.json')).hooks;
   assert.ok(codexHooks.UserPromptSubmit);
   assert.ok(codexHooks.Stop);
   assert.ok(codexHooks.PostToolUse);
@@ -338,7 +339,7 @@ test('Codex explicit safety recorder accepts only fixed categories and counts wi
     const script = path.join(CODEX, 'scripts', 'record-input-safety.js');
     const good = spawnSync(process.execPath, [script, '--kind', 'reported'], { env, encoding: 'utf8' });
     assert.equal(good.status, 0);
-    const audit = require(path.join(CODEX, 'hooks', 'decision-audit.js'));
+    const audit = require(path.join(CODEX, 'scripts/lib', 'decision-audit.js'));
     assert.equal(audit.inputSafetySummary(env).reported, 1);
     assert.equal(audit.auditHealth(env).pending_turn_starts, 0);
     const bad = spawnSync(process.execPath, [script, '--kind', 'synthetic-sensitive-value'], { env, encoding: 'utf8' });
@@ -363,7 +364,7 @@ test('a safety notice is counted only for its own turn, even when no explicit en
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priors-notice-turn-scope-'));
   try {
     for (const [root, client] of [[ROOT, 'claude'], [CODEX, 'codex']]) {
-      const audit = require(path.join(root, 'hooks', 'decision-audit.js'));
+      const audit = require(path.join(root===CODEX?CODEX:root,root===CODEX?'scripts/lib':'hooks','decision-audit.js'));
       const env = { PRIORS_DECISION_AUDIT_FILE: path.join(dir, client + '-audit') };
       audit.recordDecision({ decision: 'pending', client, phase: 'turn-start', source: 'hook', inputSafety: 'reported' }, env);
       assert.equal(audit.inputSafetySummary(env).reported, 1, 'the notice belongs to its own turn');

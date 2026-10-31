@@ -1,12 +1,11 @@
 {
   "name": "priors",
-  "version": "0.1.75",
+  "version": "0.1.76",
   "description": "重要情報を保持し、関連する過去情報をCodexから適時Recallするプラグイン",
   "author": {
     "name": "Priors"
   },
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Priors",
     "shortDescription": "Priorsの記憶をCodexで使う",

@@ -5,20 +5,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const root = path.resolve(__dirname, '..');
+const hookRoot=fs.existsSync(path.resolve(__dirname,'../../../codex-hooks'))?path.resolve(__dirname,'../../../codex-hooks'):path.resolve(__dirname,'../../../codex-plugins/priors-hooks');
+const root = hookRoot;
 const expected = ['postToolUse', 'preCompact', 'sessionStart', 'stop', 'userPromptSubmit'];
 
 test('Codex package keeps the compatibility manifest as the selected manifest', () => {
   // Codex 0.165.0 skips hook loading for root Agent Plugins manifests, even with an overlay.
   assert.equal(fs.existsSync(path.join(root, 'plugin.json')), false);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
-  assert.equal(manifest.name, 'priors');
+  assert.equal(manifest.name, 'priors-hooks');
   assert.equal(manifest.hooks, './hooks/hooks.json');
-  assert.equal(manifest.skills, './skills/');
-  assert.equal(manifest.mcpServers, './.mcp.json');
-  assert.ok(fs.existsSync(path.join(root, manifest.skills)));
-  const mcp = JSON.parse(fs.readFileSync(path.join(root, manifest.mcpServers), 'utf8'));
-  assert.ok(mcp.mcpServers.priors);
+  assert.equal(manifest.skills, undefined);
+  assert.equal(manifest.mcpServers, undefined);
   const hooks = JSON.parse(fs.readFileSync(path.join(root, manifest.hooks), 'utf8')).hooks;
   assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse', 'PreCompact', 'SessionStart', 'Stop', 'UserPromptSubmit']);
 });
@@ -32,7 +30,7 @@ test('Codex update notices read local and published compatibility manifests', as
   const saved = global.fetch;
   t.after(() => { global.fetch = saved; });
   global.fetch = async url => {
-    assert.equal(String(url), 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex/.codex-plugin/plugin.json');
+    assert.equal(String(url), 'https://raw.githubusercontent.com/brain-nakamichi/priors-plugins/main/codex-hooks/.codex-plugin/plugin.json');
     return { ok: true, text: async () => JSON.stringify({ version: current }) };
   };
   assert.equal(await checkPluginUpdate({ PRIORS_PLUGIN_UPDATE_STATE_FILE: path.join(dir, 'state.json') }), null);
@@ -66,15 +64,18 @@ test('actual engine discovers packaged hooks; a portable-root control reproduces
   });
   async function discover(portable) {
     const home = path.join(base, portable ? 'portable' : 'compatibility');
-    const installed = path.join(home, 'plugins/cache/priors/priors/0.1.67');
+    const installed = path.join(home, 'plugins/cache/priors/priors-hooks/0.1.0');
     fs.mkdirSync(installed, { recursive: true });
     fs.cpSync(root, installed, { recursive: true });
+    const coreRoot=fs.existsSync(path.resolve(__dirname,'../../../codex'))?path.resolve(__dirname,'../../../codex'):path.resolve(__dirname,'../../../codex-plugins/priors');
+    const installedCore=path.join(home,'plugins/cache/priors/priors/0.1.76');
+    fs.mkdirSync(installedCore,{recursive:true});fs.cpSync(coreRoot,installedCore,{recursive:true});
     if (portable) fs.writeFileSync(path.join(installed, 'plugin.json'), JSON.stringify({
       $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
-      name: 'priors', version: '0.1.67', description: 'synthetic packaging control',
+      name: 'priors-hooks', version: '0.1.0', description: 'synthetic packaging control',
       extensions: { 'com.openai': { hooks: './hooks/hooks.json' } },
     }));
-    fs.writeFileSync(path.join(home, 'config.toml'), '[features]\nhooks=true\nplugins=true\nremote_plugin=false\n[analytics]\nenabled=false\n[plugins."priors@priors"]\nenabled=true\n');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[features]\nhooks=true\nplugins=true\nremote_plugin=false\n[analytics]\nenabled=false\n[plugins."priors-hooks@priors"]\nenabled=true\n[plugins."priors@priors"]\nenabled=true\n');
     const before = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
     const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/TOKEN|SECRET|API_KEY|DATABASE|AUTH|^PRIORS|^CODEX/i.test(k))), CODEX_HOME: home };
     const result = await new Promise((resolve, reject) => {
@@ -116,12 +117,13 @@ test('actual engine discovers packaged hooks; a portable-root control reproduces
   assert.equal(broken.length, 2); assert.equal(fixed.length, 2);
   for (const entry of broken) {
     assert.equal(entry.errors.length, 0);
-    assert.equal(entry.hooks.filter(h => h.pluginId === 'priors@priors').length, 0);
+    assert.equal(entry.hooks.filter(h => h.pluginId === 'priors-hooks@priors').length, 0);
   }
   for (const entry of fixed) {
     assert.equal(entry.errors.length, 0);
-    const hooks = entry.hooks.filter(h => h.pluginId === 'priors@priors');
+    const hooks = entry.hooks.filter(h => h.pluginId === 'priors-hooks@priors');
     assert.deepEqual(hooks.map(h => h.eventName).sort(), expected);
+    assert.equal(entry.hooks.filter(h=>h.pluginId==='priors@priors').length,0);
     assert.ok(hooks.every(h => h.trustStatus === 'untrusted' && h.enabled && h.source === 'plugin'));
   }
 });
