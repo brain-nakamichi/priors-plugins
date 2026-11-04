@@ -59,7 +59,7 @@ UserPromptSubmit は各ターン、Stop は保存候補・安全上の懸念が�
 - 該当時は[保存・再開手順](deferred-work.md)を読む。未完了対応は同じ事象のworkへ保存し、否定・引用・完了を区別する。
 - 秘密本文・部分値・hashはshellやqueryにも転記せず安全な要旨を使う。検出は侵害の証明ではない。値無しの申告は検索を抑止しない。フックは利用者入力だけが対象でtool出力は対象外、クライアント会話ログの実値は消せない。
 - 全対象の交換または不要理由、利用先更新と必要な検証が完了条件。自動失効・発行は禁止。既知IDはfull brief、曖昧なら自動選択しない。新事象はUUIDのidempotency_key、結果不明は同じキー・引数で再送する。
-カードは[共通手順](search-card-recovery.md)に従う。
+保存時は `priors_contract.features` に `search_card_fields` があれば、`remember`、`capture` の各項目、新しい本文を書く `amend`、`maintain` の revise と分割・統合の各出力に、`search_summary`（本文にある主張だけ、600 字以内）と `keywords` を同じ呼び出しで付ける。例外・否定・重要な数値と名前・実測か推測かを残す。応答の `search_card.state` が `pending` なら記憶は保存済みなので書込を再送せず、`search_card` でカードだけを直す。詳細は[共通手順](search-card-recovery.md)に従う。
 
 ## 1. 必要な場面で機能を選ぶ
 

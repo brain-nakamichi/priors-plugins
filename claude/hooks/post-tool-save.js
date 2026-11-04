@@ -4,6 +4,7 @@ const { readHookInput } = require('./bounded-input.js');
 const { recordDecision, validSession, activeTurnId, SAVE_TOOLS, SUBTHEME_SAVE_TOOLS } = require('./decision-audit.js');
 const { candidateReceiptForSave, acknowledgeProactiveCandidateIds } = require('./proactive-candidates.js');
 const {parseSavedResponse}=require('./save-response.js');
+const {pendingCardNotice}=require('./pending-card-notice.js');
 function parseSaveResponse(input) {
  if(!validSession(input?.session_id)||input.hook_event_name!=='PostToolUse')return null;
  return parseSavedResponse(input.tool_name,input.tool_response);
@@ -42,10 +43,17 @@ function recordSaveObservation(observation, env = process.env) {
 }
 function main() {
   try {
-    const read = readHookInput(0, false); const observation = read.ok && postToolSaveObservation(read.input);
-    if (!observation) return;
+    const read = readHookInput(0, false);
+    if (!read.ok || !validSession(read.input?.session_id) || read.input.hook_event_name !== 'PostToolUse') return;
+    const observation = postToolSaveObservation(read.input);
+    const notice = pendingCardNotice(read.input.tool_name, read.input.tool_response);
+    // maintain is guidance-only: do not expand the existing save audit's tool contract.
+    if (!observation) {
+      if (notice) process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:notice}}));
+      return;
+    }
     recordSaveObservation(observation);
-    process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:'Priors: 成功応答の保存ID・版をローカル監査に記録しました。CLIでの追加記録は不要です。保存済みと報告できるのは、Priorsの成功応答で確認したID・版だけです。'}}));
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:'Priors: 成功応答の保存ID・版をローカル監査に記録しました。CLIでの追加記録は不要です。保存済みと報告できるのは、Priorsの成功応答で確認したID・版だけです。'+notice}}));
   } catch { process.stdout.write(JSON.stringify({systemMessage:'Priors: 保存観測を記録できません。終端では従来どおりIDと版を明示してください。'})); }
 }
 if (require.main === module) main();

@@ -3,6 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cryp
 const {inspectSensitiveInput}=require('./shared/sensitive-input.js');
 const {proactiveSignals,isHarnessMessage,HOLD_GUIDANCE}=require('./shared/retention-signals.js');
 const {parseSavedResponse}=require('./shared/save-response.js');
+const {pendingCardNotice}=require('./shared/pending-card-notice.js');
 const checkpoint=require('./shared/compact-checkpoint.js');
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BYTES=65536,MAX_SESSIONS=16,MAX_TURNS=8,MAX_SAVES=20,TTL=7*86400000;
@@ -73,7 +74,10 @@ function prompt(input,env){
 }
 function save(input,env){
  if(input.agent_id||input.agent_type)return null;
- const parsed=parseSavedResponse(input.tool_name,input.tool_response);if(!parsed||!parsed.ids.length)return null;
+ const parsed=parseSavedResponse(input.tool_name,input.tool_response);
+ const notice=pendingCardNotice(input.tool_name,input.tool_response);
+ const output=notice?{hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:notice}}:null;
+ if(!parsed||!parsed.ids.length)return notice?transact(env,state=>current(state,input)?output:null):null;
  return transact(env,state=>{
   const t=current(state,input);if(!t)return null;
   if(!t.saves.some(s=>s.tool===parsed.name&&JSON.stringify(s.ids)===JSON.stringify(parsed.ids)))
@@ -83,7 +87,7 @@ function save(input,env){
   if(t.candidate_id===id&&Array.isArray(parsed.response.candidate_receipts)&&parsed.response.candidate_receipts.some(r=>
    r?.candidate_id===id&&Array.isArray(r.resource_ids)&&r.resource_ids.length>0&&r.resource_ids.every(x=>parsed.ids.includes(x))))t.acknowledged=true;
   checkpoint.recordSave('codex',input.session_id,parsed.ids,t.acknowledged?[id]:[],env);
-  return null; // No same success message after every tool.
+  return output; // Keep ordinary successful saves silent; only pending cards need guidance.
  });
 }
 function stop(input,env){

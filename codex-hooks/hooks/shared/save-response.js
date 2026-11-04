@@ -11,9 +11,7 @@ function subthemeSavedRefs(name, response) {
     || !Number.isSafeInteger(response.version) || response.version <= 0) return null;
   return [`${response.item_id}@${response.version}`];
 }
-function parseSavedResponse(toolName, toolResponse) {
-  const name = typeof toolName === 'string' && toolName.startsWith('mcp__priors__') ? toolName.slice(13) : '';
-  if (!TOOLS.has(name)) return null;
+function unwrapSaveResponse(toolResponse) {
   let response = toolResponse;
   if (!response || typeof response !== 'object' || response.isError === true) return null;
   if (Array.isArray(response)) response = { content: response };
@@ -24,6 +22,13 @@ function parseSavedResponse(toolName, toolResponse) {
     try { response = JSON.parse(text[0].text); } catch { return null; }
   }
   if (!response || response.replayed === true || response.__server_replayed === true) return null;
+  return response;
+}
+function parseSavedResponse(toolName, toolResponse) {
+  const name = typeof toolName === 'string' && toolName.startsWith('mcp__priors__') ? toolName.slice(13) : '';
+  if (!TOOLS.has(name)) return null;
+  const response = unwrapSaveResponse(toolResponse);
+  if (!response) return null;
   if (SUBTHEME_SAVE_TOOLS.includes(name)) {
     const ids = subthemeSavedRefs(name, response);
     return ids ? { name, response, ids } : null;
@@ -42,4 +47,4 @@ function parseSavedResponse(toolName, toolResponse) {
   }
   return { name, response, ids: [...new Set(ids)] };
 }
-module.exports={parseSavedResponse,SAVE_TOOLS,SUBTHEME_SAVE_TOOLS};
+module.exports={parseSavedResponse,unwrapSaveResponse,SAVE_TOOLS,SUBTHEME_SAVE_TOOLS};
