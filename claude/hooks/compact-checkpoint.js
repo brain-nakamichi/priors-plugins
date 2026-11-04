@@ -4,7 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REF = /^(?:[A-Z][A-Z0-9]{1,7}-(?:c|w)?[0-9]+|[0-9a-f-]{36})@[1-9][0-9]{0,9}$/i;
 const CANDIDATE = /^pc-[0-9a-f]{12}(?:-[0-9a-f]{8})?-[a-z-]{1,120}$/;
-const CATEGORIES = ['remember-candidate','continuing-request-candidate','unresolved-candidate','work-item-candidate'];
+const CATEGORIES = ['remember-candidate','continuing-request-candidate','unresolved-candidate','work-item-candidate','hold-candidate'];
 const LIMIT = 256, MAX_BYTES = 262144, TTL = 7 * 86400000;
 function statePath(client, env) {
   const override=client==='codex'?env.PRIORS_CODEX_HOOK_STATE_FILE:env.PRIORS_DECISION_AUDIT_FILE;

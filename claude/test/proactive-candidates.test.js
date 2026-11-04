@@ -83,7 +83,7 @@ test('確認済み・期限切れ候補はpending要約から除外される', (
     assert.deepEqual(summarizeProactiveCandidates(env), {
       total: 1,
       high_confidence: 0,
-      categories: { 'recall-likely': 1, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 },
+      categories: { 'recall-likely': 1, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0, 'hold-candidate': 0 },
     });
     assert.equal(acknowledgeProactiveCandidates('skip', env), 0, 'missing turn scope must not clear a queue');
     assert.equal(acknowledgeProactiveCandidates('skip', env, '11111111-1111-4111-8111-111111111111'), 1);

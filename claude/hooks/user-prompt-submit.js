@@ -42,10 +42,11 @@ function readInput() {
 // autoRecall separately sends only inputs that pass the inspection gate.
 // These stable categories only help the model decide whether to
 // call recall or prepare a remember candidate.
-const {proactiveSignals,proactiveConfidence,isHarnessMessage,startsLikeHarness,deferredCandidate,DEFERRED_HIGH}=require('./retention-signals.js');
+const {proactiveSignals,proactiveConfidence,isHarnessMessage,startsLikeHarness,deferredCandidate,DEFERRED_HIGH,HOLD_GUIDANCE}=require('./retention-signals.js');
 
 function proactiveGuidance(signals, prompt = '', env = process.env) {
   const guidance = [];
+  if (signals.includes('hold-candidate')) guidance.push(HOLD_GUIDANCE);
   if (signals.includes('recall-likely')) guidance.push('過去情報が今回の回答や重要操作を左右し、最新文脈に不足する場合は依存前に対象を絞って取得する（context_open・recall・consult・get・timeline・expandなど、固定順序なし）');
   if (signals.includes('recall-likely') && /(?:前回|続き|再開|既存(?:仕様|の)|制約)/u.test(prompt)) {
     guidance.push(env.PRIORS_AUTO_RECALL === '1'
@@ -72,7 +73,7 @@ function proactiveGuidance(signals, prompt = '', env = process.env) {
 }
 
 function recordTurnCandidate(promptHash, signals, confidence, turnId, env = process.env) {
-  const reviewAtEnd = new Set(['remember-candidate', 'continuing-request-candidate', 'unresolved-candidate', 'work-item-candidate']);
+  const reviewAtEnd = new Set(['remember-candidate', 'continuing-request-candidate', 'unresolved-candidate', 'work-item-candidate', 'hold-candidate']);
   const endTurnSignals = Array.isArray(signals) ? signals.filter((signal) => reviewAtEnd.has(signal)) : [];
   if (endTurnSignals.length === 0) return null;
   // Candidate metadata is local and contains only a prompt hash, categories,
@@ -98,10 +99,13 @@ function main() {
   const reported = !isHarnessMessage(input.prompt) && require('./sensitive-input.js').hasDisclosureReport(input.prompt);
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
   const promptHash = hashPrompt(prompt);
-  const signals = proactiveSignals(prompt);
+  const signals = proactiveSignals(prompt).filter(signal => signal !== 'hold-candidate'
+    || !input.agent_id && !input.agent_type && (!input.source || ['user', 'human'].includes(input.source))
+      && (!input.origin || ['user', 'human'].includes(input.origin)));
   if (reported) for (const code of ['unresolved-candidate', 'work-item-candidate']) if (!signals.includes(code)) signals.push(code);
   const confidence = proactiveConfidence(prompt, signals);
-  const autoRecallText = confidence === 'high' && signals.includes('recall-likely')
+  // A new hold cue must not enable an external autoRecall that the old signals would not trigger.
+  const autoRecallText = proactiveConfidence(prompt, signals.filter(signal => signal !== 'hold-candidate')) === 'high' && signals.includes('recall-likely')
     ? runAutoRecall(prompt, input)
     : null;
   try {

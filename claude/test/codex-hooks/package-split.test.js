@@ -44,9 +44,11 @@ test('core version is inert metadata, independent of hook version and unknown la
 test('hook and core update notices use their own versions and suppress independently',async t=>{
  const d=temporary(t),root=path.join(d,'plugins/cache/priors/priors/0.1.76/.codex-plugin');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(path.join(root,'plugin.json'),JSON.stringify({name:'priors',version:'0.1.76'}));
  const old=global.fetch;t.after(()=>{global.fetch=old;});const calls=[];
- global.fetch=async u=>{calls.push(String(u));return {ok:true,text:async()=>JSON.stringify({version:String(u).includes('/codex-hooks/')?'0.1.1':'0.1.77'})};};
+ const current=JSON.parse(fs.readFileSync(path.join(hooks,'.codex-plugin/plugin.json'),'utf8')).version;
+ const parts=current.split('.').map(Number);parts[2]++;const newer=parts.join('.');
+ global.fetch=async u=>{calls.push(String(u));return {ok:true,text:async()=>JSON.stringify({version:String(u).includes('/codex-hooks/')?newer:'0.1.77'})};};
  const mod=await import(pathToFileURL(path.join(hooks,'hooks/plugin-update-check.js')).href),env={CODEX_HOME:d,PRIORS_PLUGIN_UPDATE_STATE_FILE:path.join(d,'state.json')};
- assert.match(await mod.checkPluginUpdate(env),/Priors Hooks.*0\.1\.0 → 0\.1\.1/);
+ const notice=await mod.checkPluginUpdate(env);assert.match(notice,/Priors Hooks/);assert.ok(notice.includes(`${current} → ${newer}`));
  assert.match(await mod.checkCoreUpdate(env),/Priors本体.*0\.1\.76 → 0\.1\.77/);
  assert.equal(await mod.checkPluginUpdate(env),null);assert.equal(await mod.checkCoreUpdate(env),null);
  assert.ok(calls.some(u=>u.includes('/codex-hooks/'))&&calls.some(u=>u.includes('/codex/')));

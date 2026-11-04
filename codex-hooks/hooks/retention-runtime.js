@@ -1,12 +1,12 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
 const {inspectSensitiveInput}=require('./shared/sensitive-input.js');
-const {proactiveSignals,isHarnessMessage}=require('./shared/retention-signals.js');
+const {proactiveSignals,isHarnessMessage,HOLD_GUIDANCE}=require('./shared/retention-signals.js');
 const {parseSavedResponse}=require('./shared/save-response.js');
 const checkpoint=require('./shared/compact-checkpoint.js');
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BYTES=65536,MAX_SESSIONS=16,MAX_TURNS=8,MAX_SAVES=20,TTL=7*86400000;
-const CATEGORIES=['remember-candidate','continuing-request-candidate','unresolved-candidate'];
+const CATEGORIES=['remember-candidate','continuing-request-candidate','unresolved-candidate','hold-candidate'];
 const SAVE_REF=/^(?:[A-Z][A-Z0-9]{1,7}-(?:c|w)?[0-9]+|[0-9a-f-]{36})@[1-9][0-9]{0,9}$/i;
 const CANDIDATE=/^pc-[0-9a-f]{12}-[0-9a-f]{8}-[a-z-]{1,120}$/;
 function statePath(env){env=require('./state-environment.js').stateEnvironment(env);return env.PRIORS_CODEX_HOOK_STATE_FILE?path.resolve(env.PRIORS_CODEX_HOOK_STATE_FILE):
@@ -67,6 +67,7 @@ function prompt(input,env){
   const lines=[];
   if(previous)lines.push('Priors: 前ターンの保存候補が未確認です。必要なら出所を確認して扱い、保存済みと推測しないでください。');
   if(t.candidate_id)lines.push(`Priors: 保存候補（${categories.join(' / ')}）。重要なものだけ判断して保存し、成功ID・版を確認してください。今回の候補に対応する保存だけ candidate_id=${t.candidate_id} を指定できます。`);
+  if(categories.includes('hold-candidate'))lines.push(HOLD_GUIDANCE);
   return lines.length?{hookSpecificOutput:{hookEventName:'UserPromptSubmit',additionalContext:lines.join('\n')}}:null;
  });
 }
@@ -91,7 +92,8 @@ function stop(input,env){
   const t=current(state,input);if(!t||!t.candidate_id||t.acknowledged||t.stop_notified)return null;
   t.stop_notified=true;
   // Informational only. Never block, fabricate a user turn, or automatically write memory.
-  return {systemMessage:'Priors: このターンに未確認の保存候補があります。必要なものが残ったか、成功応答のID・版で確認してください。候補は保存済みの証明ではありません。'};
+  const hold=t.categories.includes('hold-candidate')?` 未処理の控え候補 1 件。${HOLD_GUIDANCE}`:'';
+  return {systemMessage:'Priors: このターンに未確認の保存候補があります。必要なものが残ったか、成功応答のID・版で確認してください。候補は保存済みの証明ではありません。'+hold};
  });
 }
 function handle(input,env=process.env){

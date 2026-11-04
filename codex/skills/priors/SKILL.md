@@ -107,3 +107,7 @@ The `priors` package supplies skills and MCP; `priors-hooks` supplies the five o
 ## Bounded subtheme reading
 
 For an overview, prefer subtheme_detail with content=metadata and item_state=active (limit 1–20, default 20; budget_tokens 800–4000, default 2000). Items contain only item_id/title/state/version. Continue only while more=true: pass next_after as after_item_id, head_version as known_head_version, and generation as known_generation. On version_conflict restart from the first page. Read only the needed body with subtheme_memory_get, fixing known_version; read parent references separately with subtheme_references. Omitted options retain the existing full/all response. A budget_too_small response requires increasing the budget, not skipping items.
+
+### 凍結済みテーマ
+
+`context_open` / `brief` の `archive.state` が `freezing` のときは「凍結済み・未書き出し」です。DB容量が減った、バックアップが完成した、記憶が無い、とは扱いません。通常の検索からは除外され、明示IDの読取も本文なしの墓標になります。書込や意味索引を迂回して再開せず、必要なら本人にブラウザのテーマ画面で凍結解除を案内します。解除しても意味索引は自動で有効になりません。本人の正当な消去・期限切れの片付け・既存送信の費用確定は続きます。

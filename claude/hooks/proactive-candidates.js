@@ -31,7 +31,7 @@ function readJsonLines(file) {
 function recordProactiveCandidate({ promptHash, signals, confidence = 'low', turnId }, env = process.env) {
   if (!/^[0-9a-f]{64}$/.test(promptHash)) return null;
   const categories = signals.filter((value) => value === 'recall-likely' || value === 'remember-candidate'
-    || value === 'continuing-request-candidate' || value === 'unresolved-candidate' || value === 'work-item-candidate');
+    || value === 'continuing-request-candidate' || value === 'unresolved-candidate' || value === 'work-item-candidate' || value === 'hold-candidate');
   if (categories.length === 0) return null;
   const file = candidatePath(env);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -514,7 +514,7 @@ function prepareWorkEvent(candidateId, workId, input = {}, env = process.env) {
 // earlier turns are not repeated every turn, so the reminder does not become a number the AI learns to ignore
 // (87126666). They still expire after MAX_AGE_MS.
 function summarizeProactiveCandidates(env = process.env, opts = {}) {
-  const summary = { total: 0, high_confidence: 0, categories: { 'recall-likely': 0, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0 } };
+  const summary = { total: 0, high_confidence: 0, categories: { 'recall-likely': 0, 'remember-candidate': 0, 'continuing-request-candidate': 0, 'unresolved-candidate': 0, 'work-item-candidate': 0, 'hold-candidate': 0 } };
   const scoped = Object.hasOwn(opts, 'turnId');
   for (const event of pendingProactiveCandidates(env)) {
     if (scoped && event.turn_id && event.turn_id !== opts.turnId) continue;
