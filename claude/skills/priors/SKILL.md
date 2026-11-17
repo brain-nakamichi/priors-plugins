@@ -148,6 +148,7 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 訂正・撤回・pin は `remember` の作り直しではなく `amend`。リンクは `{type, target, note?, dst_version?}` で渡す。`target` は宛先の短ID、`supports` / `refutes` / `amends` は `dst_version` 必須。`get` の `direction` / `from` / `to` は渡さない。
 - 訂正は revise、変化時点が説明できる置き換えは supersede、取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証は dispute。所有者以外の記憶は変更不可（§3.1）。記憶1件の消去はretractと別の操作。別clientや保護された記憶は、所有者本人がブラウザの記憶詳細（`#/detail/短ID`）の「この記憶を消す」で内容と範囲を確認して承認する。AIは本人の承認を代行しない。
 - **pin**: 常に出したい記憶は Tier A、通常の関連記憶は Tier B。Tier A はブラウザの人間が昇格・確認付き解除・順位変更を行う、Tier B は所有者のエージェントが自律的に設定・変更する。Tier B は `pin_when.tags` か `pin_when.work` の非空条件が必須。作業種別を選ばせる必須フィルタは使わない。
+- **Tier B の付け外し**: 付けるのは「いまも守る決まり」（当面は kind が rule か decision）だけで、出来事の記録・一回限りの結果・未確定の仮説には付けない。保存の直後に (1) 今後の複数の作業で守る (2) 忘れると同じ指摘か事故になる (3) 守る場面を作業の種類か既存の tag で言える、がすべて当てはまるなら pin する。付けるときは `amend` の mode=pin に `pin_tier`=B・`pin_rank`・`pin_when`（作業の始めに渡す tag か作業の種類）・`reason` を渡す。応答の `tier_b_candidate` は判断の材料で、付けるかは AI が決める（`suggested_pin_when` の tag は保存時の先頭 2 個で、作業の始めに渡す tag とは限らない）。利用者の指摘を受けたら、その決まりが pin されているかを確かめる。`amend` の retract は pin を外し、supersede は pin を新しい記憶へ移すので、どちらも手で外さない。`maintain` の merge・split は元の pin を外すので、まとめた決まりは三つの点検に当てはまれば付け直す。手で unpin するのは前提が消えたときと期限が来たときで、長く使っていないだけでは外さない。unpin は記憶を消さない。人の保護・Tier A・他の AI の記憶の pin は変えない。自分の Tier B は 12 件前後を目安にし、大きく超えたら同じ場面の決まりを 1 件にまとめて付け直す。月初めなどの区切りで自分の Tier B を見直す。
 
 ## 6. 終える：`checkpoint`
 

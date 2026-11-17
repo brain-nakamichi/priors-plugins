@@ -30,6 +30,7 @@ function fixture(t) {
     PRIORS_STOP_DIAGNOSTIC_FILE: path.join(dir, 'stop.jsonl'),
     PRIORS_TURN_STATE_FILE: path.join(dir, 'turn-state.json'),
     PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidates.jsonl'),
+    PRIORS_PENDING_CARD_FILE: path.join(dir, 'pending-cards.json'),
   };
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return { dir, env };

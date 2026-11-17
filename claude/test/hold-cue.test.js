@@ -21,7 +21,8 @@ function fixture(t) {
     PRIORS_PROACTIVE_CANDIDATE_FILE: path.join(dir, 'candidates.jsonl'),
     PRIORS_DECISION_AUDIT_FILE: path.join(dir, 'audit.jsonl'),
     PRIORS_STOP_DIAGNOSTIC_FILE: path.join(dir, 'stop.jsonl'),
-    PRIORS_COMPACT_CHECKPOINT_FILE: path.join(dir, 'compact.json') } };
+    PRIORS_COMPACT_CHECKPOINT_FILE: path.join(dir, 'compact.json'),
+    PRIORS_TURN_STATE_FILE: path.join(dir, 'turn-state.json') } };
 }
 function claude(name, input, env, args = []) {
   const child = spawnSync(process.execPath, [path.join(root, 'hooks', name), ...args],

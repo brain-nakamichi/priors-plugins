@@ -42,9 +42,11 @@ test('replays failures malformed wrappers unknown tools and unsafe references ne
  assert.equal(notice(saved(),'get'),'');assert.equal(notice(saved(),'summary_record'),'');
 });
 test('Claude executable appends pending guidance but keeps old success text; no sensitive local persistence',t=>{
- const dir=temp(t),env={...process.env,PRIORS_DECISION_AUDIT_FILE:path.join(dir,'audit.jsonl'),PRIORS_PROACTIVE_CANDIDATE_FILE:path.join(dir,'candidates.jsonl'),PRIORS_COMPACT_CHECKPOINT_FILE:path.join(dir,'compact.json')};
+ const dir=temp(t),env={...process.env,PRIORS_DECISION_AUDIT_FILE:path.join(dir,'audit.jsonl'),PRIORS_PROACTIVE_CANDIDATE_FILE:path.join(dir,'candidates.jsonl'),PRIORS_COMPACT_CHECKPOINT_FILE:path.join(dir,'compact.json'),PRIORS_PENDING_CARD_FILE:path.join(dir,'pending-cards.json'),PRIORS_TURN_STATE_FILE:path.join(dir,'turn-state.json'),PRIORS_STOP_DIAGNOSTIC_FILE:path.join(dir,'stop.jsonl')};
  const run=(r,extra={})=>spawnSync(process.execPath,[path.resolve(__dirname,'../hooks/post-tool-save.js')],{env,encoding:'utf8',input:JSON.stringify({session_id:sid,hook_event_name:'PostToolUse',tool_name:'mcp__priors__remember',tool_input:{body:'PRIVATE-INPUT'},tool_response:wrap(r),...extra})});
  const ok=run(saved({state:'ok'})),pending=run(saved({state:'pending',error:{token:'FAKE-TOKEN'}}));
+ // the ledger went to the temporary file, not the real ~/.priors/pending-cards.json
+ assert.ok(fs.existsSync(env.PRIORS_PENDING_CARD_FILE));
  assert.equal(ok.status,0);assert.equal(pending.status,0);assert.equal(JSON.parse(pending.stdout).hookSpecificOutput.additionalContext,JSON.parse(ok.stdout).hookSpecificOutput.additionalContext+notice(saved()));
  assert.equal(run({...saved(),replayed:true}).stdout,'');
  assert.match(run(saved(),{agent_id:'agent-1'}).stdout,/GEN-1@1/); // existing Claude subagent-save rule
@@ -74,7 +76,7 @@ test('both installed PostToolUse matchers route maintain to the executable witho
  const r={operation:'amend.split',outcome_code:'applied',resource_ids:[{...ref(),search_card:{state:'pending'}}]};
  assert.equal(parseSavedResponse('mcp__priors__maintain',r),null);
  for(const [client,root]of [['claude',path.resolve(__dirname,'..')],['codex',path.resolve(__dirname,'../../codex-plugins/priors-hooks')]]){
-  const dir=temp(t),env={...process.env,PLUGIN_DATA:dir,PRIORS_DECISION_AUDIT_FILE:path.join(dir,'audit.jsonl'),PRIORS_PROACTIVE_CANDIDATE_FILE:path.join(dir,'candidates.jsonl')};
+  const dir=temp(t),env={...process.env,PLUGIN_DATA:dir,PRIORS_DECISION_AUDIT_FILE:path.join(dir,'audit.jsonl'),PRIORS_PROACTIVE_CANDIDATE_FILE:path.join(dir,'candidates.jsonl'),PRIORS_PENDING_CARD_FILE:path.join(dir,'pending-cards.json'),PRIORS_TURN_STATE_FILE:path.join(dir,'turn-state.json'),PRIORS_STOP_DIAGNOSTIC_FILE:path.join(dir,'stop.jsonl')};
   const groups=JSON.parse(fs.readFileSync(path.join(root,'hooks/hooks.json'),'utf8')).hooks.PostToolUse;
   const matched=groups.filter(g=>new RegExp(g.matcher).test('mcp__priors__maintain'));
   assert.equal(matched.length,1,client+' must select maintain');assert.equal(matched[0].hooks.length,1);
