@@ -36,7 +36,7 @@ codex.cmd plugin add priors-hooks@priors
 ## 配布版
 
 - Claude plugin: 0.1.84
-- Codex plugin（本体）: 0.1.79
+- Codex plugin（本体）: 0.1.81
 - Codex hooks（`priors-hooks`）: 0.1.2
 
 この欄は公開時点の目安です。正本は `.claude-plugin/marketplace.json`（Claude）、`codex/.codex-plugin/plugin.json`（Codex 本体）、`codex-hooks/.codex-plugin/plugin.json`（Codex フック）の `version` です。それぞれ版を別々に上げることがあります。
