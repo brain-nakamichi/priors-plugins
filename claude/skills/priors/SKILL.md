@@ -61,6 +61,20 @@ UserPromptSubmit は各ターン、Stop は保存候補・安全上の懸念が�
 - 全対象の交換または不要理由、利用先更新と必要な検証が完了条件。自動失効・発行は禁止。既知IDはfull brief、曖昧なら自動選択しない。新事象はUUIDのidempotency_key、結果不明は同じキー・引数で再送する。
 保存時は `priors_contract.features` に `search_card_fields` があれば、`remember`、`capture` の各項目、新しい本文を書く `amend`、`maintain` の revise と分割・統合の各出力に、`search_summary`（本文にある主張だけ、600 字以内）と `keywords` を同じ呼び出しで付ける。例外・否定・重要な数値と名前・実測か推測かを残す。応答の `search_card.state` が `pending` なら記憶は保存済みなので書込を再送せず、`search_card` でカードだけを直す。詳細は[共通手順](search-card-recovery.md)に従う。
 
+### 本番への引継ぎの印（`refs.handoff`）
+- 印を書くことは無害で、契約の `features` の有無に関係なく書く（知らせの表示とは独立。実際の印が溜まるほど知らせの測定が確かになる）。
+- テストまで終え、本番への適用・配備を別の担当や後日に回すときだけ、その引継ぎの記憶を `remember` で書き、`refs.handoff` に contract（`priors.handoff.v1`）、phase `awaiting_production`、executor、subject、environment（例 production の小文字の語）、artifact（種別と参照）、handed_off_at（オフセット付きの日時）を付ける。subject と environment は英小文字・数字・記号 `.` `_` `-` の短い語。細部は `remember` の tool 説明に従い、書けるのは `remember` だけ。サーバーと DB は印の形を常に検査し、形が違うと保存されず invalid_input になるので、次の最小の例と値の範囲から外れない。
+```json
+{"contract":"priors.handoff.v1","phase":"awaiting_production","executor":"user","subject":"my-change","environment":"production",
+ "artifact":{"kind":"commit","ref":"abc1234"},"handed_off_at":"2026-01-02T09:00:00+09:00"}
+```
+  - phase は `awaiting_production` か完了・取消、executor は担当（Claude・Codex・利用者・その他）、artifact の種別は commit・migration・deployment・plugin・document・other のどれか。artifact は種別と参照の 2 つだけ、キーは上の例のものだけで、未知のキー（例 type や sha）を足さない。完了を書くときだけ outcome（成功か失敗）を付け、他の phase では付けない。
+- 本番を実施した後は、引継ぎの記憶へ `answers` の link を張り、phase `completed` と outcome を付けた記憶を `remember` する。subject・environment・artifact を引継ぎと揃える。完了の知らせが止まるのは outcome が成功のときだけで、失敗は失敗として書く。
+- 延期（`deferred_until`）は利用者が決めたときだけ付ける。AI の都合や推測では付けない。
+- 実施を確かめられないまま、推測で `completed` を書かない。確かめられなければ未確認のまま利用者に尋ねる。
+- 延期・取消は `amend` では書けない（refs は書けない）。新しい印つきの `remember` を書き、元の記憶を `amend` の置換で差し替える。
+- `context_open` / `brief` の `handoff_hint` や `stale_work` は確認の促しで、実施・未実施の証明ではない。`next_action` の `get` で本文を読み、現物で確かめてから判断する。
+
 ## 1. 必要な場面で機能を選ぶ
 
 Priorsを使う場合、読取・書込に必要な session / theme の確認方法をサーバの instructions から読む。

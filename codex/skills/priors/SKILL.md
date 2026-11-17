@@ -36,6 +36,21 @@ Whenever it helps, do the following without prior user approval and report what 
 
 Before long work (changes across several files, production operations, or work that may collide with another AI), check for the same work with `brief`, and register it with `work_create` if none exists (your judgment; not required). The ledger is the state of record for long work; a working note supplements it and carries the work_id.
 
+## Hand-off marker for production (`refs.handoff`)
+
+- Writing the marker is harmless and does not depend on `features` (it is independent of whether the reminders are shown; real markers make the measurement of the reminders meaningful).
+- Only when testing is complete and applying/deploying to production is handed to someone else or to a later time, write that hand-off as a `remember` with `refs.handoff`: contract (`priors.handoff.v1`), phase `awaiting_production`, executor, subject, environment (a short lowercase word such as production), artifact (kind and reference), handed_off_at (a timestamp with an offset). Subject and environment are short words of lowercase letters, digits and `.` `_` `-`. Follow the `remember` tool description for the details; only `remember` can write it. The server and the DB always check the marker shape, and a wrong shape is not saved (invalid_input), so stay inside this minimal example and these values:
+```json
+{"contract":"priors.handoff.v1","phase":"awaiting_production","executor":"user","subject":"my-change","environment":"production",
+ "artifact":{"kind":"commit","ref":"abc1234"},"handed_off_at":"2026-01-02T09:00:00+09:00"}
+```
+  - phase is `awaiting_production`, or the completed / cancelled phase; executor is who does it (Claude, Codex, the user or other); the artifact kind is one of commit, migration, deployment, plugin, document, other. The artifact has only a kind and a reference, and no key outside the example may be added (for example type or sha). Add outcome (success or failure) only when writing the completed phase, never in the other phases.
+- After production is done, `remember` a memory that links to the hand-off memory with `answers`, with phase `completed` and an outcome. Keep subject, environment and artifact the same as the hand-off. The reminder stops only for a successful outcome; write a failure as a failure.
+- Set a deferral (`deferred_until`) only when the user decides it, never for your own convenience or by guess.
+- Never write `completed` by guessing. If you cannot confirm it was done, leave it unconfirmed and ask the user.
+- `amend` cannot write refs. To defer or cancel, write a new `remember` with the marker, then replace the old memory with an `amend` replacement.
+- `handoff_hint` and `stale_work` in `context_open` / `brief` are prompts to check, not proof that anything was or was not done. Read the memory with the `get` in `next_action` and verify against the real thing before deciding.
+
 ## One subject per memory
 
 Write one memory per subject. Keep deployment/work reports short and link subject memories with `relates_to`; do not dilute an existing memory by adding another subject.
