@@ -54,6 +54,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "^(Bash|PowerShell)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/operation-outcome.js\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreCompact": [

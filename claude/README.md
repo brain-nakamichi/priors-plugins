@@ -21,7 +21,7 @@ SQL371 の quota 表示に対応。`accounting_mode=refundable` かつ `refunds_
 ## 既定の動作
 
 - SessionStartは短い機能案内だけを表示し、MCPや記憶を読みません。公開リポジトリに新しい版があれば、起動のたびに GitHub の plugin.json を読み取り専用で確認し、案内は同じ版につき 1 日 1 回だけ出します（失敗時は何も出しません。token・MCP設定は使いません）。
-- `hooks.json` はSessionStartの機能案内に加え、UserPromptSubmitで各ターンの開始時に保持基準とRecall条件の案内を出し、Stopは未処理の候補または安全上の通知があるときだけ案内します（無ければ何も出しません）。機能の選択はAIの判断です。フックは会話本文を自動保存しません。自動Recallは `PRIORS_AUTO_RECALL=1` を明示設定した場合だけで、そのときは高確度の兆候があるプロンプトを検索語としてPriors MCPへ送ります。保存操作が成功した場合はPostToolUseが成功応答の記憶IDと版だけをローカル監査へ記録し、本文は記録しません。
+- `hooks.json` はSessionStartの機能案内に加え、UserPromptSubmitで各ターンの開始時に保持基準とRecall条件の案内を出し、Stopは未処理の候補または安全上の通知があるときだけ案内します（無ければ何も出しません）。機能の選択はAIの判断です。フックは会話本文を自動保存しません。自動Recallは `PRIORS_AUTO_RECALL=1` を明示設定した場合だけで、そのときは高確度の兆候があるプロンプトを検索語としてPriors MCPへ送ります。Priorsの保存操作が成功した場合はPostToolUseが成功応答の記憶IDと版だけをローカル監査へ記録し、本文は記録しません。Bash / PowerShell の後のPostToolUse（`hooks/operation-outcome.js`）は、出力で成功を確かめられた git push（新しいブランチ・削除を含む）・プラグインの公開（`brain-nakamichi/priors-plugins` の main への push）・`vercel deploy --prod`（`--no-wait` を除く）・本番への `apply-NNN.ts --execute`（`--test` と `--rollback` を除く）を操作ごとに1回だけ候補にします。既定は影の判定で、`~/.priors/operation-hints.json`（`PRIORS_OPERATION_HINT_FILE` で変更可）に種別と安全な参照（リポジトリ名・ref・短いcommit・配備先・段番号）だけを記録し、表示しません。`PRIORS_OPERATION_HINTS=on` で短い案内を表示し、`off` で止めます。コマンド全文・出力・資格情報は記録しません。
 - 自律Rememberの案内は既定で有効です。既定でもUserPromptSubmitは本文なしの候補（ハッシュ・種別・信頼度）をローカルに記録し、成功した保存の candidate_id か、保存不要と判断したターンの `record-decision.js --decision skip` で解決します。`PRIORS_AUTO_REMEMBER=0` は候補箱モードで、候補は永続保存の代わりになりません。
 - 起動時に記憶を自動読取する機能はありません。`PRIORS_AUTO_RECALL=1` の明示opt-inを除き、AIが必要と判断したときにMCP機能を選びます。
 - 保存時は事実・推測・決定・未決定と出所を区別します。継続指示・重要な決定や制約・却下案・未完了の約束・重大な結果・重要な訂正は、明示依頼を待たず保存します（通常の事実・一時的な話題・秘密は保存しません）。ツール契約、認可、容量、guardの結果に従い、成功応答のIDと版を確認します。
