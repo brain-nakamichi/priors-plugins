@@ -45,6 +45,9 @@ function main() {
   try {
     const read = readHookInput(0, false);
     if (!read.ok || !validSession(read.input?.session_id) || read.input.hook_event_name !== 'PostToolUse') return;
+    // GEN-2374 (A): keep the per-conversation list of memories that still need a search card. Best effort;
+    // a failure here must never change the save audit or its message.
+    try { require('./pending-card-ledger.js').recordToolResult(read.input.session_id, read.input.tool_name, read.input.tool_input, read.input.tool_response); } catch { /* list is advisory */ }
     const observation = postToolSaveObservation(read.input);
     const notice = pendingCardNotice(read.input.tool_name, read.input.tool_response);
     // maintain is guidance-only: do not expand the existing save audit's tool contract.

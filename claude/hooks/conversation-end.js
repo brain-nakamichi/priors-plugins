@@ -28,10 +28,11 @@ function candidateGuidance(summary) {
   return steps.length > 0 ? `候補の兆候: ${steps.join('。')}。候補検出は網羅性の証明ではない。` : '';
 }
 
-function reminderPayload({ pendingCandidateCount, holdCandidateCount = 0, safetyGuidance = '', invalidLines = 0, invalidLinesChanged = false }) {
+function reminderPayload({ pendingCandidateCount, holdCandidateCount = 0, safetyGuidance = '', invalidLines = 0, invalidLinesChanged = false, pendingCardLine = '' }) {
   const lines = [];
   if (pendingCandidateCount > 0) lines.push(`今回のターンの未処理候補 ${pendingCandidateCount} 件。保持基準に合うものだけ確認し、保存した場合は成功応答のID・版を確かめてください。`);
   if (holdCandidateCount > 0) lines.push(`未処理の控え候補 ${holdCandidateCount} 件。${HOLD_GUIDANCE}`);
+  if (pendingCardLine) lines.push(pendingCardLine);
   if (safetyGuidance) lines.push(safetyGuidance);
   if (invalidLinesChanged && invalidLines > 0) lines.push(`ローカル監査ログの形式不正行が ${invalidLines} 件あります（状態が変わった時だけ通知）。`);
   if (lines.length === 0) return null;
@@ -85,7 +86,11 @@ try {
   try { invalidLinesChanged = recordStopInvocation({ stopHookActive: false, invalidLines: health.invalid_lines }).invalidLinesChanged; } catch { /* diagnostics are best effort */ }
   // UserPromptSubmit already provides the policy each turn. Stop is a
   // backstop only when there is an actionable candidate or safety issue.
-  const output = reminderPayload({ pendingCandidateCount, holdCandidateCount: refreshedSummary.categories['hold-candidate'], safetyGuidance, invalidLines: health.invalid_lines, invalidLinesChanged });
+  // GEN-2374 (A): memories saved in this conversation that still have no search card (IDs only, capped, at most
+  // three times for the same list). Advisory: any failure leaves the stop as it was.
+  let pendingCardLine = '';
+  try { pendingCardLine = require('./pending-card-ledger.js').pendingCardStopNotice(input.session_id); } catch { /* advisory */ }
+  const output = reminderPayload({ pendingCandidateCount, holdCandidateCount: refreshedSummary.categories['hold-candidate'], safetyGuidance, invalidLines: health.invalid_lines, invalidLinesChanged, pendingCardLine });
   if (!output) process.exit(0);
   process.stdout.write(JSON.stringify(output));
 } catch {

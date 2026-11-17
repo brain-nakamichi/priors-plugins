@@ -35,7 +35,7 @@ codex.cmd plugin add priors-hooks@priors
 
 ## 配布版
 
-- Claude plugin: 0.1.81
+- Claude plugin: 0.1.84
 - Codex plugin（本体）: 0.1.79
 - Codex hooks（`priors-hooks`）: 0.1.2
 

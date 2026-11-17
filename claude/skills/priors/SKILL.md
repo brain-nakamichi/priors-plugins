@@ -146,7 +146,7 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 ## 5. 直す：`amend`
 
 訂正・撤回・pin は `remember` の作り直しではなく `amend`。リンクは `{type, target, note?, dst_version?}` で渡す。`target` は宛先の短ID、`supports` / `refutes` / `amends` は `dst_version` 必須。`get` の `direction` / `from` / `to` は渡さない。
-- 訂正は revise、変化時点が説明できる置き換えは supersede、取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証は dispute。所有者以外の記憶は変更不可（§3.1）。「消して」と言われたら retract を提案する。実データの削除は利用者がブラウザの使用容量（`/#/usage`）で行う。
+- 訂正は revise、変化時点が説明できる置き換えは supersede、取り消すのは retract（**削除ではなく retraction として残す** — 「なぜ覆したか」が価値）、反証は dispute。所有者以外の記憶は変更不可（§3.1）。記憶1件の消去はretractと別の操作。別clientや保護された記憶は、所有者本人がブラウザの記憶詳細（`#/detail/短ID`）の「この記憶を消す」で内容と範囲を確認して承認する。AIは本人の承認を代行しない。
 - **pin**: 常に出したい記憶は Tier A、通常の関連記憶は Tier B。Tier A はブラウザの人間が昇格・確認付き解除・順位変更を行う、Tier B は所有者のエージェントが自律的に設定・変更する。Tier B は `pin_when.tags` か `pin_when.work` の非空条件が必須。作業種別を選ばせる必須フィルタは使わない。
 
 ## 6. 終える：`checkpoint`
@@ -170,6 +170,7 @@ historical claimの背景をさらに調べる必要がある場合は、返さ�
 | `not_found` | ID かテーマ prefix の誤り。`themes` と `id_syntax` で確認 |
 | `rate_limited` | `retry_after_seconds` 待って同じ `idempotency_key` で 1 回だけ再試行 |
 | `user_quota_exceeded` / `capacity_owner_unassigned` | 容量上限・責任者未割当。再試行せず、`charged_to: self` なら利用者に `/#/usage` の整理を案内、他はテーマ管理者へ |
+| 検索は成功したが `coverage.semantic.status` が `failed` / `unavailable` | 意味検索を使わない、言葉の一致だけの結果。**「見つからない」と結論しない**。言い換えた言葉で探すか、時間をおいて探し直す。同じ検索をすぐに何度も繰り返さない |
 
 ## History の登録が not_found になるとき
 
@@ -191,3 +192,11 @@ For an overview, prefer subtheme_detail with content=metadata and item_state=act
 ### 凍結済みテーマ
 
 `context_open` / `brief` の `archive.state` が `freezing` のときは「凍結済み・未書き出し」です。DB容量が減った、バックアップが完成した、記憶が無い、とは扱いません。通常の検索からは除外され、明示IDの読取も本文なしの墓標になります。書込や意味索引を迂回して再開せず、必要なら本人にブラウザのテーマ画面で凍結解除を案内します。解除しても意味索引は自動で有効になりません。本人の正当な消去・期限切れの片付け・既存送信の費用確定は続きます。
+
+## 通常記憶の cold と復帰
+
+契約の `features` に `entry_cold` がある場合だけ、利用者が選んだ ID・期待版で `entry_cold_preview` を使う。利用台帳が無い間の `entry_cold_candidates` は unavailable であり、未使用が0件という意味ではない。自動採点で選ばず、pin・約束・未完了・参照などの保護を迂回しない。自principalの非保護記憶だけがAIの対象で、別clientは本人のブラウザ承認を案内する。
+下見のID・保持するカード原本の課金・vectorの論理容量減を示し、承認後だけ `entry_cold_execute` を呼ぶ。acceptedは完了ではない。`entry_cold_status` と明示の `entry_cold_resume` で続け、検索非参加と本文・全版・固定出典の可読性を混同しない。確認鍵は手元の一時変数だけに置き、記憶・ログ・引継ぎへ保存しない。同じ操作の再送は同じ冪等キーを使う。完了後の処理記録には保持期限がある。期限切れなら新しい下見と再送鍵でやり直し、古い承認を再利用しない。
+復帰の下見で送信bytes・Neurons・合計費用・当日残量を示す。復帰の確定・続行は本人のブラウザ操作が必須で、AIはMCPで自己承認しない。予約ではなく当日残量の再確認であり、協定世界時の日付変更・予算消費で失効したらブラウザで再承認する。カードを作り直さず原本だけを送る。getだけで自動復帰せず、予算不足や再承認待ちは隠れた状態を保つ。物理DBファイルの縮小や外部提供元の消去完了とは報告しない。
+
+coldの記憶のpin追加・amend・supersede・検索カード変更は、先にブラウザで復帰する。正規の容量整理と完全消去は既存の権限・確認手順で行える。復帰完了時はcold中だけの追加カード課金を返す。
